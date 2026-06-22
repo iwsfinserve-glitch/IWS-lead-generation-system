@@ -1,0 +1,31 @@
+# ── FastAPI & Server ──
+fastapi[standard]
+uvicorn[standard]
+
+# ── Database (Async) ──
+sqlalchemy[asyncio]
+asyncpg
+alembic
+
+# ── Validation & Settings ──
+pydantic[email]
+pydantic-settings
+
+# ── Authentication ──
+python-jose[cryptography]
+bcrypt
+python-multipart
+
+# ── Encryption (Google token storage) ──
+cryptography
+
+# ── Google Workspace Integration ──
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+
+# ── AI Reporting ──
+google-genai
+
+# ── DOCX Report Generation ──
+python-docx

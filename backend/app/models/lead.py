@@ -1,0 +1,105 @@
+"""
+Lead & LeadSource Models — the core CRM entities.
+
+LeadSource — categorises how a lead was acquired (e.g. Walk-in, SEO).
+Lead       — an individual prospect tracked through the sales pipeline.
+
+Status lifecycle:
+    new → in_progress → potential → converted_to_investor
+                      ↘ non_potential
+"""
+
+from datetime import date, datetime, timezone
+
+from sqlalchemy import (
+    Integer, String, Enum, Date, DateTime, ForeignKey, Text,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base
+from app.models.enums import LeadStatus
+
+
+
+
+
+class LeadSource(Base):
+    """How a lead was acquired (e.g. 'Walk-in', 'SEO', 'Referral')."""
+
+    __tablename__ = "lead_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    priority: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="medium",
+        comment="high | medium | low",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    # ── Relationships ──
+    leads: Mapped[list["Lead"]] = relationship("Lead", back_populates="source", lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<LeadSource id={self.id} name={self.name!r}>"
+
+
+
+
+
+
+
+class Lead(Base):
+    """An individual prospect in the sales pipeline."""
+
+    __tablename__ = "leads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    profession: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    status: Mapped[LeadStatus] = mapped_column(
+        Enum(LeadStatus, name="lead_status", create_constraint=True),
+        nullable=False,
+        default=LeadStatus.new,
+    )
+    last_contact: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    source_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("lead_sources.id"), nullable=True,
+    )
+    assigned_rep_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    # ── Relationships ─────────────────────────────────────────────────
+    source: Mapped["LeadSource | None"] = relationship(
+        "LeadSource", back_populates="leads", lazy="selectin",
+    )
+    assigned_rep: Mapped["User | None"] = relationship(               # noqa: F821
+        "User", back_populates="leads", lazy="selectin",
+    )
+    timeline: Mapped[list["LeadTimeline"]] = relationship(            # noqa: F821
+        "LeadTimeline", back_populates="lead",
+        cascade="all, delete-orphan", lazy="selectin",
+    )
+    appointments: Mapped[list["Appointment"]] = relationship(         # noqa: F821
+        "Appointment", back_populates="lead",
+        cascade="all, delete-orphan", lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Lead id={self.id} name={self.name!r} status={self.status.value}>"
