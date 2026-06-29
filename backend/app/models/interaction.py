@@ -66,8 +66,8 @@ class LeadTimeline(Base):
     )
 
     # ── Relationships ──────────────────────────────────────────────────
-    lead: Mapped["Lead"] = relationship("Lead", back_populates="timeline")      # noqa: F821
-    user: Mapped["User"] = relationship("User", back_populates="timeline_entries")  # noqa: F821
+    lead: Mapped["Lead"] = relationship("Lead", back_populates="timeline", lazy="selectin")      # noqa: F821
+    user: Mapped["User"] = relationship("User", back_populates="timeline_entries", lazy="selectin")  # noqa: F821
 
     def __repr__(self) -> str:
         return f"<LeadTimeline id={self.id} lead_id={self.lead_id} type={self.event_type!r}>"
@@ -111,8 +111,8 @@ class Appointment(Base):
     )
 
     # ── Relationships ──────────────────────────────────────────────────
-    lead: Mapped["Lead"] = relationship("Lead", back_populates="appointments")    # noqa: F821
-    user: Mapped["User"] = relationship("User", back_populates="appointments")    # noqa: F821
+    lead: Mapped["Lead"] = relationship("Lead", back_populates="appointments", lazy="selectin")    # noqa: F821
+    user: Mapped["User"] = relationship("User", back_populates="appointments", lazy="selectin")    # noqa: F821
 
     def __repr__(self) -> str:
         return f"<Appointment id={self.id} title={self.title!r}>"
@@ -166,11 +166,11 @@ class Task(Base):
     # ── Relationships ──────────────────────────────────────────────────
     user: Mapped["User"] = relationship(                               # noqa: F821
         "User", back_populates="tasks_owned",
-        foreign_keys=[user_id],
+        foreign_keys=[user_id], lazy="selectin",
     )
     assigner: Mapped["User | None"] = relationship(                    # noqa: F821
         "User", back_populates="tasks_assigned",
-        foreign_keys=[assigned_by],
+        foreign_keys=[assigned_by], lazy="selectin",
     )
 
     def __repr__(self) -> str:

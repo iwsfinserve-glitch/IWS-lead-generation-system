@@ -1,8 +1,7 @@
-from streamlit.runtime.state.common import WidgetSerializer
 import streamlit as st
-import pandas as pd
-from datetime import datetime
-from components.sidebar import render_sidebar
+from datetime import datetime, date
+from components.auth_guard import require_login
+import api_client
 
 st.set_page_config(
     page_title="Lead Management System",
@@ -10,8 +9,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# # # Sidebar   
-# render_sidebar()
+# ── Auth gate ──
+require_login()
+
 st.markdown("""
 <style>
 .stApp {
@@ -49,109 +49,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Lead Detail Drawer (using @st.dialog) ──
-@st.dialog(" ", width="medium")
-def show_lead_panel(lead_id, status_color):
-    lead_mask = st.session_state.leads_df["Lead ID"] == lead_id
-    lead_data = st.session_state.leads_df.loc[lead_mask].iloc[0]
+TOKEN = st.session_state.token
+USER = st.session_state.user
 
-    # Header: Name + Company (matching wireframe)
-    # st.header(f"{lead_data['Name']}")
-    # st.caption(lead_data["Company"])
-    st.markdown(f"""<h1 style="display: inline; font-weight: 800;">{lead_data["Name"]}</h1>&nbsp;&nbsp;<h4 style="display: inline; font-weight: 400;">{lead_data["Company"]}</h4>""", unsafe_allow_html=True)
-    st.markdown("---")
 
-    # Details section
-    st.markdown('<h2>Details</h2>', unsafe_allow_html=True)
-    source_col, assignedTo_col = st.columns(2)
-    with source_col: st.markdown(f"**Source:** {lead_data['Source']}")
-    with assignedTo_col: st.markdown(f"**Assigned To:** {lead_data['Assigned To']}")
-        
-    email_col, phone_col = st.columns(2)
-    with email_col: st.markdown(f"**Email:** {lead_data['Email']}")
-    with phone_col: st.markdown(f"**Phone No:** {lead_data['Phone']}")
-    
-    lastContact_col, status_col = st.columns(2)
-    with lastContact_col: st.markdown(f"**Last Contact:** {lead_data['Last Contact']}")
-    with status_col: st.markdown(f"**Status:** {status_span(lead_data['Status'], status_color)}", unsafe_allow_html=True)
-    
-    st.markdown("---")
-
-    # Update Lead section
-    st.markdown('<h2>Update Lead</h2>', unsafe_allow_html=True)
-    STATUS_OPTIONS = ["New", "In Progress", "Potential", "Non-Potential"]
-    
-    status_col, date_col = st.columns(2)
-    with status_col:
-        new_status = st.selectbox(
-            "Change Status",
-            options=STATUS_OPTIONS,
-            index=STATUS_OPTIONS.index(lead_data["Status"]),
-        )
-    with date_col:
-        try:
-            current_date = datetime.strptime(lead_data["Last Contact"], "%Y-%m-%d").date()
-        except:
-            current_date = datetime.now().date()
-        new_last_contact = st.date_input("Last Contact", value=current_date)
-        
-    if st.button("Update Lead Details", use_container_width=True, type="primary"):
-        st.session_state.leads_df.loc[lead_mask, "Status"] = new_status
-        st.session_state.leads_df.loc[lead_mask, "Last Contact"] = new_last_contact.strftime("%Y-%m-%d")
-        
-        # Log the status change
-        if new_status != lead_data["Status"]:
-            st.session_state.interaction_log.append({
-                "lead_id": lead_id,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "note": "Status updated manually.",
-                "status_change": f"{lead_data['Status']} → {new_status}"
-            })
-            
-        st.toast("Lead details updated successfully!")
-        st.rerun()
-
-    st.markdown("---")
-    
-    # Appointment Booking Section (Future Google Calendar Integration)
-    st.markdown('<h2>Book Appointment</h2>', unsafe_allow_html=True)
-    appt_date_col, btn_col = st.columns([3, 1])
-    with appt_date_col:
-        appointment_date = st.date_input("Select Appointment Date", label_visibility="collapsed")
-    with btn_col:
-        if st.button("Select", key=f"book_appt_{lead_id}", use_container_width=True):
-            st.toast(f"Feature coming soon: Book appointment on {appointment_date}")
-
-    st.markdown("---")
-
-    # Notes Section
-    st.markdown("<h2>Interaction History</h2>", unsafe_allow_html=True)
-    with st.form(key=f"note_form_{lead_id}", clear_on_submit=True):
-        notes = st.text_area("Add a new note", height=100, placeholder="Enter call notes here...")
-        submitted = st.form_submit_button("Add Note", use_container_width=True)
-        if submitted and notes.strip():
-            st.session_state.interaction_log.append({
-                "lead_id": lead_id,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "note": notes.strip(),
-                "status_change": ""
-            })
-            st.rerun()
-            
-    # Show Note History
-    st.markdown("<br>", unsafe_allow_html=True)
-    lead_logs = [log for log in st.session_state.interaction_log if log["lead_id"] == lead_id]
-    if lead_logs:
-        for log in reversed(lead_logs):
-            status_text = f" — `{log['status_change']}`" if log.get('status_change') else ""
-            st.markdown(
-                f"**{log['timestamp']}**{status_text}\n\n"
-                f"_{log['note']}_"
-            )
-            st.markdown("---")
-    else:
-        st.caption("No notes yet.")
-
+# ── Helper functions ──
 def metric_card(label, value):
     return f"""
     <div style="
@@ -180,6 +82,7 @@ def metric_card(label, value):
         </p>
     </div>
     """
+
 def status_span(status_type, bg_color):
     return f"""
     <span style="
@@ -195,78 +98,161 @@ def status_span(status_type, bg_color):
     </span>
     """
 
+STATUS_DISPLAY = {
+    "new": "New",
+    "in_progress": "In Progress",
+    "potential": "Potential",
+    "non_potential": "Non-Potential",
+    "converted_to_investor": "Converted",
+}
 
-if "leads_df" not in st.session_state:
-    st.session_state.leads_df = pd.DataFrame({
-        "Lead ID":    ["L-001", "L-002", "L-003", "L-004", "L-005"],
-        "Name":       ["Arjun Mehta", "Priya Sharma", "Rohan Desai", "Sneha Nair", "Vikram Patel"],
-        "Company":    ["TechNova Pvt Ltd", "GreenLeaf Exports", "Meridian Solutions", "Coastal Ventures", "Pinnacle Corp"],
-        "Email":      ["arjun@technova.in", "priya@greenleaf.in", "rohan@meridian.in", "sneha@coastal.in", "vikram@pinnacle.in"],
-        "Phone":      ["+91-9876543210", "+91-9123456780", "+91-9988776655", "+91-9012345678", "+91-9876012345"],
-        "Status":     ["New", "In Progress", "Potential", "New", "Non-Potential"],
-        "Source":     ["Website", "Referral", "Cold Call", "LinkedIn", "Website"],
-        "Assigned To":["Amit", "Amit", "Suresh", "Neha", "Rahul"],
-        "Last Contact": ["2026-06-01", "2026-06-03", "2026-05-28", "2026-06-04", "2026-05-20"],
-    })
-
-if "interaction_log" not in st.session_state:
-    st.session_state.interaction_log = [
-        {
-            "lead_id": "L-001",
-            "timestamp": "2026-06-05 10:30",
-            "note": "Initial call. Client is interested in our new software suite. Requested a follow-up next week.",
-            "status_change": "New → Potential"
-        },
-        {
-            "lead_id": "L-002",
-            "timestamp": "2026-06-03 14:15",
-            "note": "Sent pricing details. Waiting for their response.",
-            "status_change": "New → In Progress"
-        }
-    ]
-
-if "selected_lead_id" not in st.session_state:
-    st.session_state.selected_lead_id = None
-
-# ── Appointments dummy data ──
-if "appointments" not in st.session_state:
-    st.session_state.appointments = [
-        {"id": "A-001", "title": "Follow-up with Arjun", "day": "2026-06-10",
-         "time": "10:00", "mode": "Online", "location": "Google Meet", "note": "Discuss pricing"},
-        {"id": "A-002", "title": "Demo for Priya", "day": "2026-06-10",
-         "time": "14:30", "mode": "In Person", "location": "GreenLeaf Office, Panaji",
-         "note": "Product walkthrough"},
-        {"id": "A-003", "title": "Contract review - Rohan", "day": "2026-06-12",
-         "time": "11:00", "mode": "Online", "location": "Zoom", "note": "Final terms"},
-    ]
-
-# ── Tasks dummy data ──
-if "tasks" not in st.session_state:
-    st.session_state.tasks = [
-        {"id": "T-001", "created": "2026-06-10", "due": "2026-06-15", "title": "Prepare Q3 proposal", "description": "Draft the proposal for Meridian Solutions.", "status":"New"},
-        {"id": "T-002", "created": "2026-06-10", "due": "2026-06-15", "title": "Update CRM records", "description": "Sync all lead statuses from this week.", "status":"In Progress"},
-        {"id": "T-003", "created": "2026-06-10", "due": "2026-06-15", "title": "Schedule team standup", "description": "Book a recurring 15-min daily standup.", "status":"Completed"},
-        {"id": "T-004", "created": "2026-06-06", "due": "2026-06-10", "title": "Submit Meeting report", "description": "Submit meeting report to management.", "status":"Overdue"},
-    ]
+STATUS_OPTIONS_API = ["new", "in_progress", "potential", "non_potential", "converted_to_investor"]
+STATUS_OPTIONS_DISPLAY = [STATUS_DISPLAY[s] for s in STATUS_OPTIONS_API]
 
 
+# ── Lead Detail Drawer ──
+@st.dialog(" ", width="medium")
+def show_lead_panel(lead_id, status_color):
+    try:
+        lead = api_client.get_lead(TOKEN, lead_id)
+    except Exception as e:
+        st.error(f"Failed to load lead: {e}")
+        return
+
+    display_status = STATUS_DISPLAY.get(lead["status"], lead["status"])
+
+    st.markdown(f"""<h1 style="display: inline; font-weight: 800;">{lead["name"]}</h1>&nbsp;&nbsp;<h4 style="display: inline; font-weight: 400;">{lead.get("profession") or ""}</h4>""", unsafe_allow_html=True)
+    st.markdown("---")
+
+    # Details section
+    st.markdown('<h2>Details</h2>', unsafe_allow_html=True)
+    source_col, assignedTo_col = st.columns(2)
+    with source_col: st.markdown(f"**Source:** {lead.get('source_name') or 'N/A'}")
+    with assignedTo_col: st.markdown(f"**Assigned To:** {lead.get('assigned_rep_name') or 'N/A'}")
+
+    email_col, phone_col = st.columns(2)
+    with email_col: st.markdown(f"**Email:** {lead.get('email') or 'N/A'}")
+    with phone_col: st.markdown(f"**Phone No:** {lead.get('phone_number') or 'N/A'}")
+
+    lastContact_col, status_col = st.columns(2)
+    with lastContact_col: st.markdown(f"**Last Contact:** {lead.get('last_contact') or 'N/A'}")
+    with status_col: st.markdown(f"**Status:** {status_span(display_status, status_color)}", unsafe_allow_html=True)
+
+    if lead.get("address"):
+        st.markdown(f"**Address:** {lead['address']}")
+
+    st.markdown("---")
+
+    # Update Lead section
+    st.markdown('<h2>Update Lead</h2>', unsafe_allow_html=True)
+
+    current_idx = STATUS_OPTIONS_API.index(lead["status"]) if lead["status"] in STATUS_OPTIONS_API else 0
+
+    status_col_u, date_col = st.columns(2)
+    with status_col_u:
+        new_status_display = st.selectbox(
+            "Change Status",
+            options=STATUS_OPTIONS_DISPLAY,
+            index=current_idx,
+        )
+    with date_col:
+        try:
+            current_date = datetime.strptime(lead["last_contact"], "%Y-%m-%d").date() if lead.get("last_contact") else datetime.now().date()
+        except:
+            current_date = datetime.now().date()
+        new_last_contact = st.date_input("Last Contact", value=current_date)
+
+    if st.button("Update Lead Details", use_container_width=True, type="primary"):
+        new_status_api = STATUS_OPTIONS_API[STATUS_OPTIONS_DISPLAY.index(new_status_display)]
+        update_data = {}
+        if new_status_api != lead["status"]:
+            update_data["status"] = new_status_api
+        if new_last_contact.isoformat() != (lead.get("last_contact") or ""):
+            update_data["last_contact"] = new_last_contact.isoformat()
+
+        if update_data:
+            try:
+                api_client.update_lead(TOKEN, lead_id, update_data)
+                st.toast("Lead updated successfully!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Update failed: {e}")
+        else:
+            st.toast("No changes to save.")
+
+    st.markdown("---")
+
+    # Interaction History
+    st.markdown("<h2>Interaction History</h2>", unsafe_allow_html=True)
+    with st.form(key=f"note_form_{lead_id}", clear_on_submit=True):
+        notes = st.text_area("Add a new note", height=100, placeholder="Enter call notes here...")
+        submitted = st.form_submit_button("Add Note", use_container_width=True)
+        if submitted and notes.strip():
+            try:
+                api_client.add_timeline_note(TOKEN, lead_id, "note", {"note": notes.strip()})
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to add note: {e}")
+
+    # Show timeline
+    st.markdown("<br>", unsafe_allow_html=True)
+    try:
+        timeline = api_client.get_timeline(TOKEN, lead_id)
+        if timeline:
+            for entry in timeline:
+                ts = entry["created_at"][:16].replace("T", " ")
+                event_type = entry["event_type"]
+                meta = entry.get("event_metadata", {})
+                user_name = entry.get("user_name", "")
+
+                if event_type == "status_change":
+                    old = STATUS_DISPLAY.get(meta.get("old_status", ""), meta.get("old_status", ""))
+                    new = STATUS_DISPLAY.get(meta.get("new_status", ""), meta.get("new_status", ""))
+                    note_text = meta.get("note", "")
+                    st.markdown(f"**{ts}** — `{old} → {new}`\n\n_{note_text}_" if note_text else f"**{ts}** — `{old} → {new}`")
+                elif event_type == "note":
+                    st.markdown(f"**{ts}** — _{meta.get('note', '')}_")
+                elif event_type == "lead_created":
+                    st.markdown(f"**{ts}** — Lead created from {meta.get('source', 'unknown source')}")
+                elif event_type == "appointment_booked":
+                    st.markdown(f"**{ts}** — Appointment: {meta.get('title', '')}")
+                else:
+                    st.markdown(f"**{ts}** — {event_type}")
+                st.markdown("---")
+        else:
+            st.caption("No timeline entries yet.")
+    except Exception as e:
+        st.error(f"Failed to load timeline: {e}")
+
+
+# ── Fetch data from API ──
+try:
+    leads = api_client.get_leads(TOKEN)
+except Exception as e:
+    st.error(f"Failed to load leads: {e}")
+    leads = []
+
+# ── Sidebar: User info + Logout ──
+with st.sidebar:
+    st.markdown(f"**{USER.get('name', '')}**")
+    st.caption(f"{USER.get('role', '').replace('_', ' ').title()} — {USER.get('email', '')}")
+    if st.button("Logout", use_container_width=True):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
+
+# ── Page Header ──
 st.title("Lead Management System")
-
 st.markdown('<hr style=height:1px;background:#d4d4d4; margin-bottom: 10px; margin-top: 0px;">', unsafe_allow_html=True)
 st.markdown('<h2 style="margin-bottom: 10px;">Dashboard</h2>', unsafe_allow_html=True)
 
-df = st.session_state.leads_df
+# ── Metrics ──
+total = len(leads)
+new = len([l for l in leads if l["status"] == "new"])
+potent = len([l for l in leads if l["status"] == "potential"])
+non_pot = len([l for l in leads if l["status"] == "non_potential"])
+converted = len([l for l in leads if l["status"] == "converted_to_investor"])
 
-total = len(df)
-new = len(df[df["Status"] == "New"])
-potent = len(df[df["Status"] == "Potential"])
-non_pot = len(df[df["Status"] == "Non-Potential"])
-
-col1, col2, col3, col4 = st.columns(4)
-# with col1: st.metric(label="Total Leads", value=total)
-# with col2: st.metric(label="New Leads", value=new)
-# with col3: st.metric(label="Potential Leads", value=potent)
-# with col4: st.metric(label="Non-Potential Leads", value=non_pot)
 st.markdown(
     f"""
     <div style="
@@ -278,59 +264,55 @@ st.markdown(
         {metric_card("Total Leads", total)}
         {metric_card("New Leads", new)}
         {metric_card("Potential Leads", potent)}
-        {metric_card("Non-Potential Leads", non_pot)}
+        {metric_card("Converted", converted)}
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 
-
-
 # ── Filters ──
 st.subheader("All Leads")
+
+# Get unique assigned reps and sources from the leads data
+rep_names = sorted(set(l.get("assigned_rep_name", "") for l in leads if l.get("assigned_rep_name")))
+source_names = sorted(set(l.get("source_name", "") for l in leads if l.get("source_name")))
+
 filter_col1, filter_col2, filter_col3 = st.columns(3)
 with filter_col1:
     status_filter = st.multiselect(
         "Status Filter",
-        options=["New", "In Progress", "Potential", "Non-Potential"],
+        options=list(STATUS_DISPLAY.values()),
     )
 with filter_col2:
     rep_filter = st.multiselect(
         "Filter by rep",
-        options=df["Assigned To"].unique(),
+        options=rep_names,
     )
 with filter_col3:
-    search_term = st.text_input("Search by Name or Company", value="", placeholder="Enter Name or Company here")
+    search_term = st.text_input("Search by Name", value="", placeholder="Enter Name here")
 
-# Apply filters
-if status_filter or rep_filter:
-    filtered_df = df[
-        (df["Status"].isin(status_filter) if status_filter else True) &
-        (df["Assigned To"].isin(rep_filter) if rep_filter else True)
-    ]
-else:
-    filtered_df = df.copy()
-
+# Apply client-side filters
+filtered_leads = leads
+if status_filter:
+    api_statuses = [k for k, v in STATUS_DISPLAY.items() if v in status_filter]
+    filtered_leads = [l for l in filtered_leads if l["status"] in api_statuses]
+if rep_filter:
+    filtered_leads = [l for l in filtered_leads if l.get("assigned_rep_name") in rep_filter]
 if search_term:
-    mask = (
-        filtered_df["Name"].str.contains(search_term, case=False, na=False) |
-        filtered_df["Company"].str.contains(search_term, case=False, na=False)
-    )
-    filtered_df = filtered_df[mask]
+    term = search_term.lower()
+    filtered_leads = [l for l in filtered_leads if term in l["name"].lower() or term in (l.get("profession") or "").lower()]
 
-st.caption(f"Showing {len(filtered_df)} of {len(df)} leads")
+st.caption(f"Showing {len(filtered_leads)} of {len(leads)} leads")
+
 
 # ── Lead Cards ──
-# CSS to make the invisible button overlay the HTML card
 st.markdown("""
 <style>
-    /* Pull the button up over the card using negative margin */
     div.element-container:has(.overlay-trigger) {
         margin-bottom: -85px;
         position: relative;
     }
-    /* Style the button container to be invisible but clickable */
     div.element-container:has(.overlay-trigger) + div.element-container {
         opacity: 0;
         position: relative;
@@ -341,7 +323,6 @@ st.markdown("""
         width: 100% !important;
         cursor: pointer;
     }
-    /* Add a subtle hover effect to the HTML card */
     .overlay-trigger:hover {
         border-color: #555;
         background-color: #f9f9f9;
@@ -350,19 +331,18 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-for idx, row in filtered_df.iterrows():
-    lead = row
+status_config = {
+    "new":           {"abbr": "N",  "bg": "blue"},
+    "in_progress":   {"abbr": "IP", "bg": "#FFC107"},
+    "potential":     {"abbr": "P",  "bg": "#4CAF50"},
+    "non_potential": {"abbr": "NP", "bg": "Red"},
+    "converted_to_investor": {"abbr": "C", "bg": "#2196F3"},
+}
 
-    # Status configuration: abbreviation + colors
-    status_config = {
-        "New":           {"abbr": "N",  "bg": "blue"},
-        "In Progress":   {"abbr": "IP", "bg": "#FFC107"},
-        "Potential":     {"abbr": "P",  "bg": "#4CAF50"},
-        "Non-Potential": {"abbr": "NP", "bg": "Red"},
-    }
-    s = status_config.get(lead["Status"], {"abbr": "?", "bg": "#555"})
+for lead in filtered_leads:
+    s = status_config.get(lead["status"], {"abbr": "?", "bg": "#555"})
+    display_status = STATUS_DISPLAY.get(lead["status"], lead["status"])
 
-    # Render card matching wireframe
     st.markdown(
         f"""
         <div class="overlay-trigger" style="
@@ -378,15 +358,15 @@ for idx, row in filtered_df.iterrows():
             <div style="flex:1; padding:12px 16px;">
                 <div style="display:flex; align-items:baseline; gap:10px;">
                     <span style="color:#333; font-size:1.2rem; font-weight:600; line-height:1.2;">
-                        {lead['Name']}
+                        {lead['name']}
                     </span>
                     <span style="color:#666; font-size:0.85rem; font-weight:400; line-height:1.2;">
-                        {lead['Company']}
+                        {lead.get('profession') or ''}
                     </span>
                 </div>
                 <div style="margin-top:4px;">
                     <span style="color:#777; font-size:0.8rem; font-weight:400; line-height:1.2;">
-                        Source: {lead['Source']} &nbsp;|&nbsp; Assigned To: {lead['Assigned To']}
+                        Source: {lead.get('source_name') or 'N/A'} &nbsp;|&nbsp; Assigned To: {lead.get('assigned_rep_name') or 'N/A'}
                     </span>
                 </div>
             </div>
@@ -405,5 +385,5 @@ for idx, row in filtered_df.iterrows():
     )
 
     # Invisible Select button — opens the drawer dialog
-    if st.button("Select", key=f"card_{lead['Lead ID']}", use_container_width=True):
-        show_lead_panel(lead["Lead ID"], s['bg'])
+    if st.button("Select", key=f"card_{lead['id']}", use_container_width=True):
+        show_lead_panel(lead["id"], s['bg'])
