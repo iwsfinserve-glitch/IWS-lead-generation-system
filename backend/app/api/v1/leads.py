@@ -39,14 +39,13 @@ async def list_leads(
     source_id: int | None = None,
     assigned_rep_id: int | None = None,
     search: str | None = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List leads with optional filters. Sales reps see only their assigned leads."""
+    """List leads with optional filters."""
     query = select(Lead)
-
-    if current_user.role.value == "sales_rep":
-        query = query.where(Lead.assigned_rep_id == current_user.id)
 
     if status_filter:
         query = query.where(Lead.status == status_filter)
@@ -63,7 +62,7 @@ async def list_leads(
             )
         )
 
-    query = query.order_by(Lead.created_at.desc())
+    query = query.order_by(Lead.created_at.desc()).offset(skip).limit(limit)
     result = await db.execute(query)
     leads = result.scalars().all()
     return [LeadRead.from_orm_lead(l) for l in leads]
@@ -106,7 +105,6 @@ async def get_lead(
 ):
     """Get a single lead with RBAC check."""
     lead = await _get_lead_or_404(lead_id, db)
-    _check_lead_access(lead, current_user)
     return LeadRead.from_orm_lead(lead)
 
 
@@ -165,7 +163,6 @@ async def get_lead_timeline(
 ):
     """Get the full audit timeline for a lead."""
     lead = await _get_lead_or_404(lead_id, db)
-    _check_lead_access(lead, current_user)
 
     result = await db.execute(
         select(LeadTimeline)

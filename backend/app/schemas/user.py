@@ -14,6 +14,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=6, max_length=128)
     role: UserRole = UserRole.sales_rep
+    manager_id: int | None = None
 
 
 class UserRead(BaseModel):
@@ -22,6 +23,7 @@ class UserRead(BaseModel):
     name: str
     email: str
     role: UserRole
+    manager_id: int | None = None
     google_connected: bool = False
 
     model_config = {"from_attributes": True}
@@ -33,6 +35,7 @@ class UserRead(BaseModel):
             name=user.name,
             email=user.email,
             role=user.role,
+            manager_id=user.manager_id,
             google_connected=user.google_refresh_token is not None,
         )
 
@@ -40,13 +43,16 @@ class UserRead(BaseModel):
 class UserUpdate(BaseModel):
     """Schema for updating an existing user — all fields optional."""
     name: str | None = Field(None, min_length=1, max_length=255)
+    email: EmailStr | None = None
     password: str | None = Field(None, min_length=6, max_length=128)
     role: UserRole | None = None
+    manager_id: int | None = None
 
 
 class Token(BaseModel):
     """JWT token response returned after successful login."""
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
 
 

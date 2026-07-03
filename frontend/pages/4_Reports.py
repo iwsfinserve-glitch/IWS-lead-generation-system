@@ -1,47 +1,35 @@
 import streamlit as st
+import asyncio
 import time
 from datetime import date, timedelta
-from components.auth_guard import require_login
+from core.auth import require_login, logout
 from components.report_engine import generate_chart_buffer, generate_docx_report
-import api_client
+from core import api_client
+from core.api_client import APIError
+from core.state import state
+from core.styles import inject_global_styles
+from components.layout import render_sidebar
 
 st.set_page_config(page_title="Reports", page_icon="", layout="wide")
 
-# ── Auth gate ──
+inject_global_styles()
+
+
 require_login()
 
-TOKEN = st.session_state.token
-USER = st.session_state.user
-
-# ── Page-level CSS ──
-st.markdown("""
-<style>
-.stApp {
-    background-color: #fefefe;
-    background-image:
-        radial-gradient(circle, rgba(20,20,20,0.1) .8px, transparent .3px);
-    background-size: 10px 10px;
-}
-</style>
-""", unsafe_allow_html=True)
+TOKEN = state.token
+USER = state.user or {}
 
 # ── Sidebar ──
-with st.sidebar:
-    st.markdown(f"**{USER.get('name', '')}**")
-    st.caption(f"{USER.get('role', '').replace('_', ' ').title()}")
-    if st.button("Logout", use_container_width=True, key="report_logout"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
+render_sidebar(key_suffix="report")
 
 # ── Fetch leads for dropdown ──
 try:
-    leads = api_client.get_leads(TOKEN)
+    leads = api_client.get_leads(TOKEN, limit=1000)
     lead_options = {l["id"]: f"{l['name']} — {l.get('profession') or 'N/A'}" for l in leads}
-except Exception:
+except APIError:
     leads = []
     lead_options = {}
-
 
 # ── Page Header ──
 st.markdown('<h1 style="display: inline; font-weight: 800;">Reports</h1><br>', unsafe_allow_html=True)
@@ -71,7 +59,7 @@ with tab1:
                     st.session_state["lead_journey_docx"] = docx_bytes
                     st.session_state["lead_journey_lead_name"] = lead_options[selected_lead_id]
                     st.success("Report generated successfully!")
-                except Exception as e:
+                except APIError as e:
                     error_msg = str(e)
                     if "403" in error_msg:
                         st.error("You don't have access to generate reports for this lead.")
@@ -107,7 +95,7 @@ with tab2:
                     docx_bytes = api_client.download_team_performance_report(TOKEN)
                     st.session_state["team_perf_docx"] = docx_bytes
                     st.success("Team performance report generated successfully!")
-                except Exception as e:
+                except APIError as e:
                     st.error(f"Report generation failed: {e}")
 
         if "team_perf_docx" in st.session_state:

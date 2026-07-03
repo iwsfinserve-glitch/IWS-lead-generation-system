@@ -1,0 +1,220 @@
+import streamlit as st
+import asyncio
+from datetime import datetime
+from core.auth import require_login, logout
+from core import api_client
+from core.state import state
+from core.api_client import APIError
+from core.styles import inject_global_styles
+from components.layout import render_sidebar, render_pagination
+from components.modals import show_lead_panel, metric_card, STATUS_DISPLAY
+from components.cards import render_lead_card, render_lead_cards, render_user_cards
+
+st.set_page_config(
+    page_title="Lead Management System",
+    page_icon="",
+    layout="wide"
+)
+
+inject_global_styles(drawer=True, overlay_cards=True, user_cards=True)
+
+
+require_login()
+
+TOKEN = state.token
+USER = state.user or {}
+
+# ── Sidebar: User info + Logout ──
+render_sidebar(key_suffix="dash")
+
+# ── Page Header ──
+st.title("Lead Management System")
+st.markdown('<hr style="height:1px;background:#d4d4d4; margin-bottom: 10px; margin-top: 0px;">', unsafe_allow_html=True)
+st.markdown('<h2 style="margin-bottom: 10px;">Dashboard</h2>', unsafe_allow_html=True)
+
+# ── Pagination Setup ──
+if "lead_page" not in st.session_state:
+    st.session_state.lead_page = 1
+
+PAGE_SIZE = 25
+
+def get_leads_data():
+    try:
+        user_id = (state.user or {}).get("id")
+        user_role = (state.user or {}).get("role")
+        rep_id = user_id if user_role == "sales_rep" else None
+        all_leads = api_client.get_leads(TOKEN, assigned_rep_id=rep_id, limit=1000)
+        skip = (st.session_state.lead_page - 1) * PAGE_SIZE
+        page_leads = api_client.get_leads(TOKEN, assigned_rep_id=rep_id, skip=skip, limit=PAGE_SIZE)
+        return all_leads, page_leads
+    except APIError as e:
+        st.error(f"Failed to load leads: {e}")
+        return [], []
+
+@st.fragment
+def render_sales_rep_dashboard():
+    all_leads, page_leads = get_leads_data()
+    total = len(all_leads)
+    new = len([l for l in all_leads if l["status"] == "new"])
+    potent = len([l for l in all_leads if l["status"] == "potential"])
+    converted = len([l for l in all_leads if l["status"] == "converted_to_investor"])
+
+    st.markdown(
+        f"""
+<div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:16px; margin-bottom:20px;">
+{metric_card("Total Leads", total)}
+{metric_card("New Leads", new)}
+{metric_card("Potential Leads", potent)}
+{metric_card("Converted", converted)}
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
+    render_filters_and_leads(all_leads)
+
+@st.fragment
+def render_filters_and_leads(all_leads):
+    # ── Filters ──
+    st.subheader("All Leads")
+
+    # Get unique assigned reps and sources from the leads data
+    rep_names = sorted(set(l.get("assigned_rep_name", "") for l in all_leads if l.get("assigned_rep_name")))
+
+    filter_col1, filter_col2, filter_col3 = st.columns(3)
+    with filter_col1:
+        status_filter = st.multiselect(
+            "Status Filter",
+            options=list(STATUS_DISPLAY.values()),
+        )
+    with filter_col2:
+        rep_filter = st.multiselect(
+            "Filter by rep",
+            options=rep_names,
+        )
+    with filter_col3:
+        search_term = st.text_input("Search by Name", value="", placeholder="Enter Name here")
+
+    filtered_leads = all_leads
+    if status_filter:
+        api_statuses = [k for k, v in STATUS_DISPLAY.items() if v in status_filter]
+        filtered_leads = [l for l in filtered_leads if l["status"] in api_statuses]
+    if rep_filter:
+        filtered_leads = [l for l in filtered_leads if l.get("assigned_rep_name") in rep_filter]
+    if search_term:
+        term = search_term.lower()
+        filtered_leads = [l for l in filtered_leads if term in l["name"].lower() or term in (l.get("profession") or "").lower()]
+
+    # Client-side pagination slice
+    PAGE_SIZE = 10
+    skip = (st.session_state.lead_page - 1) * PAGE_SIZE
+    paginated_filtered_leads = filtered_leads[skip:skip+PAGE_SIZE]
+
+    total_pages = (len(filtered_leads) // PAGE_SIZE) + (1 if len(filtered_leads) % PAGE_SIZE > 0 else 0)
+
+    st.caption(f"Showing {len(paginated_filtered_leads)} of {len(filtered_leads)} leads (Page {st.session_state.lead_page} of {total_pages})")
+
+    render_lead_cards(paginated_filtered_leads, key_prefix="card", on_click=show_lead_panel)
+            
+    render_pagination(len(filtered_leads), "lead_page", page_size=10)
+
+
+def delete_user_handler(user_id):
+    try:
+        api_client.delete_user(TOKEN, user_id)
+        st.toast("User deleted.")
+        st.rerun()
+    except APIError as e:
+        st.error(f"Failed to delete: {e}")
+
+@st.dialog("Manage User")
+def manage_user_dialog(user=None):
+    st.markdown(f"<h3>{'Edit User' if user else 'Create User'}</h3>", unsafe_allow_html=True)
+    with st.form("manage_user_form"):
+        name = st.text_input("Name", value=user['name'] if user else "")
+        email = st.text_input("Email", value=user['email'] if user else "")
+        password = st.text_input("Password (leave blank to keep current)" if user else "Password", type="password")
+        role = st.selectbox("Role", ["sales_rep", "manager", "admin"], index=["sales_rep", "manager", "admin"].index(user['role']) if user else 0)
+        
+        try:
+            all_users = api_client.get_users(TOKEN)
+            managers = [u for u in all_users if u['role'] in ['manager', 'admin']]
+            manager_options = {u['id']: u['name'] for u in managers}
+            manager_options[None] = "None"
+            current_manager = user.get('manager_id') if user else None
+            manager_id = st.selectbox("Manager", options=list(manager_options.keys()), format_func=lambda x: manager_options[x], index=list(manager_options.keys()).index(current_manager) if current_manager in manager_options else list(manager_options.keys()).index(None))
+        except:
+            manager_id = None
+        
+        submitted = st.form_submit_button("Save User")
+        if submitted:
+            data = {"name": name, "email": email, "role": role}
+            if manager_id is not None:
+                data["manager_id"] = manager_id
+            if password:
+                data["password"] = password
+                
+            try:
+                if user:
+                    api_client.update_user(TOKEN, user['id'], data)
+                    st.toast("User updated.")
+                else:
+                    api_client.register_user(TOKEN, data)
+                    st.toast("User created.")
+                st.rerun()
+            except APIError as e:
+                st.error(f"Error: {e}")
+
+def render_manager_dashboard():
+    try:
+        users = api_client.get_users(TOKEN)
+        # Filter reps that report to this manager
+        my_reps = [u for u in users if u.get("manager_id") == USER.get("id")]
+        
+        st.markdown(
+            f"""
+<div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:16px; margin-bottom:20px;">
+{metric_card("Direct Reports", len(my_reps))}
+</div>
+            """, unsafe_allow_html=True
+        )
+        st.subheader(f"Directory ({len(my_reps)})")
+        render_user_cards(my_reps, key_prefix="mgr_user", is_admin=False)
+    except APIError as e:
+        st.error(f"Failed to fetch users: {e}")
+
+def render_admin_dashboard():
+    if st.button("＋ Create New User", type="primary"):
+        manage_user_dialog()
+    try:
+        users = api_client.get_users(TOKEN)
+        
+        st.markdown(
+            f"""
+<div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:16px; margin-bottom:20px;">
+{metric_card("Total Users", len(users))}
+{metric_card("Admins", len([u for u in users if u['role'] == 'admin']))}
+{metric_card("Managers", len([u for u in users if u['role'] == 'manager']))}
+{metric_card("Sales Reps", len([u for u in users if u['role'] == 'sales_rep']))}
+</div>
+            """, unsafe_allow_html=True
+        )
+        st.subheader(f"Directory ({len(users)})")
+        render_user_cards(
+            users,
+            key_prefix="adm_user",
+            is_admin=True,
+            on_edit=manage_user_dialog,
+            on_delete=delete_user_handler,
+        )
+    except APIError as e:
+        st.error(f"Failed to fetch users: {e}")
+
+
+# ── Role-based Rendering ──
+user_role = USER.get('role', 'sales_rep')
+if user_role == 'admin':
+    render_admin_dashboard()
+elif user_role == 'manager':
+    render_manager_dashboard()
+else:
+    render_sales_rep_dashboard()

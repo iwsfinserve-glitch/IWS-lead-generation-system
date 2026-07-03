@@ -4,7 +4,7 @@ Task routes — CRUD with background Google Tasks sync.
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,9 @@ router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
 @router.get("/", response_model=list[TaskRead])
 async def list_tasks(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    user_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -25,7 +28,9 @@ async def list_tasks(
     query = select(Task)
     if current_user.role.value == "sales_rep":
         query = query.where(Task.user_id == current_user.id)
-    query = query.order_by(Task.assigned_on.desc())
+    elif user_id is not None:
+        query = query.where(Task.user_id == user_id)
+    query = query.order_by(Task.assigned_on.desc()).offset(skip).limit(limit)
     result = await db.execute(query)
     return [TaskRead.from_orm_task(t) for t in result.scalars().all()]
 

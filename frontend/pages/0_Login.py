@@ -1,25 +1,33 @@
 import streamlit as st
-from api_client import login, get_me
+import asyncio
+from core.api_client import login, get_me, get_users, get_sources, APIError, APIConnectionError, APIAuthError
+from core.auth import save_token_cookie, controller, COOKIE_NAME
+from core.state import state
+from core.styles import inject_global_styles
 
 st.set_page_config(page_title="Login — Lead Management", page_icon="", layout="wide")
 
-# ── CSS: Same dotted background + centered form ──
-st.markdown("""
-<style>
-.stApp {
-    background-color: #fefefe;
-    background-image:
-        radial-gradient(circle, rgba(20,20,20,0.1) .8px, transparent .3px);
-    background-size: 10px 10px;
-}
-</style>
-""", unsafe_allow_html=True)
+inject_global_styles()
 
-# If already logged in, show a message and redirect
-if "token" in st.session_state and st.session_state.token:
-    st.success(f"Already logged in as **{st.session_state.user.get('name', '')}** ({st.session_state.user.get('role', '')})")
-    st.page_link("app.py", label="Go to Dashboard", icon="📊")
+
+# ── Check if already logged in (session_state OR cookie) ──
+if state.token:
+    user_info = state.user or {}
+    st.success(f"Already logged in as **{user_info.get('name', '')}** ({user_info.get('role', '')})")
+    st.page_link("pages/1_Dashboard.py", label="Go to Dashboard", icon="📊")
     st.stop()
+
+# Try cookie recovery
+saved_token = controller.get(COOKIE_NAME)
+if saved_token:
+    try:
+        user = get_me(saved_token)
+        state.token = saved_token
+        state.user = user
+        # UPDATE: Point to the new Dashboard route
+        st.switch_page("pages/1_Dashboard.py")
+    except Exception:
+        controller.remove(COOKIE_NAME)
 
 # ── Login Card ──
 st.markdown("<br>", unsafe_allow_html=True)
@@ -52,22 +60,33 @@ with center_col:
             try:
                 result = login(email, password)
                 token = result["access_token"]
+                refresh_token = result.get("refresh_token")
                 user = get_me(token)
 
-                st.session_state.token = token
-                st.session_state.user = user
+                state.token = token
+                state.user = user
+                if refresh_token:
+                    state.refresh_token = refresh_token
+                
+                # Save both to cookie as a JSON string
+                import json
+                save_token_cookie(json.dumps({"access": token, "refresh": refresh_token}))
 
-                st.success(f"Welcome, **{user['name']}**!")
-                st.switch_page("app.py")
+                # Eager Loading: Prime the cache for frequently accessed data
+                try:
+                    get_users(token)
+                    get_sources(token)
+                except Exception:
+                    pass
 
-            except Exception as e:
-                error_msg = str(e)
-                if "401" in error_msg:
-                    st.error("Invalid email or password.")
-                elif "Connection" in error_msg:
-                    st.error("Cannot connect to backend server. Make sure it's running on port 8000.")
-                else:
-                    st.error(f"Login failed: {error_msg}")
+                st.switch_page("pages/1_Dashboard.py")
+
+            except APIAuthError:
+                st.error("Invalid email or password.")
+            except APIConnectionError as e:
+                st.error(f"Backend offline: {e}")
+            except APIError as e:
+                st.error(f"Login failed: {e}")
 
     # ── Quick login hints ──
     st.markdown("---")

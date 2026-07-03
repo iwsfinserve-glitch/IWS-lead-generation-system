@@ -20,6 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.enums import UserRole
+from sqlalchemy import ForeignKey
 
 
 class User(Base):
@@ -41,7 +42,11 @@ class User(Base):
     google_refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     google_token_expiry: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    manager_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     # ── Relationships ─────────────────────────────────────────────────
+    manager: Mapped["User"] = relationship("User", remote_side=[id], back_populates="subordinates") # noqa: F821
+    subordinates: Mapped[list["User"]] = relationship("User", back_populates="manager") # noqa: F821
     # back_populates creates a bidirectional link between models.
     leads: Mapped[list["Lead"]] = relationship(                        # noqa: F821
         "Lead", back_populates="assigned_rep", lazy="selectin",

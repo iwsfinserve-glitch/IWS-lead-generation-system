@@ -4,7 +4,7 @@ Auth routes — registration, login, user listing, and Google OAuth connection.
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from google_auth_oauthlib.flow import Flow
@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import (
-    hash_password, verify_password, create_access_token,
+    hash_password, verify_password, create_access_token, create_refresh_token,
     encrypt_token, decrypt_token,
 )
 from app.db.session import get_db
@@ -21,6 +21,10 @@ from app.db.base import User
 from app.models.enums import UserRole
 from app.schemas.user import UserCreate, UserRead, UserUpdate, Token
 from app.api.dependencies import get_current_user, require_roles
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -58,7 +62,9 @@ def _build_google_flow() -> Flow:
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+@limiter.limit("5/minute")
 async def register_user(
+    request: Request,
     payload: UserCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles("admin")),
@@ -76,6 +82,7 @@ async def register_user(
         email=payload.email,
         hashed_password=hash_password(payload.password),
         role=payload.role,
+        manager_id=payload.manager_id,
     )
     db.add(user)
     await db.commit()
@@ -84,7 +91,9 @@ async def register_user(
 
 
 @router.post("/login", response_model=Token)
+@limiter.limit("5/minute")
 async def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -100,7 +109,42 @@ async def login(
         )
 
     token = create_access_token(data={"sub": str(user.id), "role": user.role.value})
-    return Token(access_token=token)
+    refresh = create_refresh_token(data={"sub": str(user.id), "role": user.role.value})
+    return Token(access_token=token, refresh_token=refresh)
+
+from pydantic import BaseModel
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+@router.post("/refresh", response_model=Token)
+@limiter.limit("10/minute")
+async def refresh_access_token(
+    request: Request,
+    payload: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Exchange a valid refresh token for a new access token."""
+    from jose import JWTError, jwt
+    try:
+        token_data = jwt.decode(payload.refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        if token_data.get("type") != "refresh":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+        
+        user_id = token_data.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token payload")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+        
+    result = await db.execute(select(User).where(User.id == int(user_id)))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+        
+    new_access = create_access_token(data={"sub": str(user.id), "role": user.role.value})
+    # We optionally could issue a new refresh token (rotation), but we'll stick to a long-lived one for simplicity here
+    return Token(access_token=new_access, refresh_token=payload.refresh_token)
 
 
 @router.get("/me", response_model=UserRead)
@@ -143,6 +187,51 @@ async def update_user(
     await db.commit()
     await db.refresh(user)
     return UserRead.from_orm_user(user)
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles("admin")),
+):
+    """Delete a user. Admin only. Cleans up related records first."""
+    from app.models.interaction import LeadTimeline, Appointment, Task
+    from app.models.lead import Lead
+    from sqlalchemy import update as sa_update, delete as sa_delete
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+
+    # Nullify leads assigned to this user
+    await db.execute(
+        sa_update(Lead).where(Lead.assigned_rep_id == user_id).values(assigned_rep_id=None)
+    )
+    # Delete timeline entries created by this user
+    await db.execute(
+        sa_delete(LeadTimeline).where(LeadTimeline.user_id == user_id)
+    )
+    # Delete appointments owned by this user
+    await db.execute(
+        sa_delete(Appointment).where(Appointment.user_id == user_id)
+    )
+    # Delete tasks assigned to or created by this user
+    await db.execute(
+        sa_delete(Task).where((Task.user_id == user_id) | (Task.assigned_by == user_id))
+    )
+    # Nullify subordinates' manager_id
+    await db.execute(
+        sa_update(User).where(User.manager_id == user_id).values(manager_id=None)
+    )
+
+    await db.delete(user)
+    await db.commit()
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════

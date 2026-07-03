@@ -17,6 +17,7 @@ router = APIRouter(prefix="/appointments", tags=["Appointments"])
 @router.get("/", response_model=list[AppointmentRead])
 async def list_appointments(
     lead_id: int | None = None,
+    user_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -24,6 +25,8 @@ async def list_appointments(
     query = select(Appointment)
     if current_user.role.value == "sales_rep":
         query = query.where(Appointment.user_id == current_user.id)
+    elif user_id is not None:
+        query = query.where(Appointment.user_id == user_id)
     if lead_id:
         query = query.where(Appointment.lead_id == lead_id)
     query = query.order_by(Appointment.start_time.desc())

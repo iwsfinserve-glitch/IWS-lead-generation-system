@@ -11,11 +11,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1 import auth, sources, leads, appointments, tasks, reports
 
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(
     title="Lead Management CRM API",
     description="Asynchronous backend for the Lead Management System",
     version="1.0.0",
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS Configuration ─────────────────────────────────────────────────
 # Update allow_origins for production to the specific Streamlit frontend URL
