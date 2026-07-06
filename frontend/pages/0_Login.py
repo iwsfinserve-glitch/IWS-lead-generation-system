@@ -95,6 +95,6 @@ with center_col:
     | Role | Email | Password |
     |------|-------|----------|
     | Admin | `admin@example.com` | `admin123` |
-    | Manager | `priya@iwsfinserve.com` | `manager123` |
+    | Manager | `anish@iwsfinserve.com` | `manager123` |
     | Sales Rep | `rahul@iwsfinserve.com` | `rahul123` |
     """)

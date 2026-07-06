@@ -8,7 +8,7 @@ from core.styles import inject_global_styles
 from components.layout import render_sidebar, render_pagination
 from components.modals import (
     show_lead_panel, STATUS_DISPLAY, STATUS_CONFIG, ACTIVE_STATUSES,
-    STATUS_OPTIONS_API, STATUS_OPTIONS_DISPLAY,
+    STATUS_OPTIONS_API, STATUS_OPTIONS_DISPLAY, create_lead_dialog,
 )
 from components.cards import render_lead_cards
 
@@ -48,6 +48,9 @@ if "converted_page" not in st.session_state:
 # ── Page Header ──
 st.title("All Leads Directory")
 st.markdown('<hr style="height:1px;background:#d4d4d4; margin-bottom: 10px; margin-top: 0px;">', unsafe_allow_html=True)
+
+if st.button("＋ Create New Lead", type="primary", key="allleads_create_btn"):
+    create_lead_dialog()
 
 # ── Fetch all leads ──
 try:

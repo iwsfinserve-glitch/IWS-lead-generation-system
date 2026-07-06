@@ -6,7 +6,7 @@ from core import api_client
 from core.api_client import APIError
 from core.state import state
 from core.styles import inject_global_styles
-from components.layout import render_sidebar
+from components.layout import render_sidebar, render_pagination
 from components.cards import render_task_cards
 from components.modals import show_task_panel
 
@@ -56,28 +56,20 @@ USER = state.user or {}
 # ── Sidebar ──
 render_sidebar(key_suffix="task")
 
-# ── Pagination Setup ──
-if "task_page" not in st.session_state:
-    st.session_state.task_page = 1
+# ── Init pagination state ──
+if "pending_task_page" not in st.session_state:
+    st.session_state.pending_task_page = 1
+if "completed_task_page" not in st.session_state:
+    st.session_state.completed_task_page = 1
 
-PAGE_SIZE = 25
+PAGE_SIZE = 10
 
-# ── Fetch data ──
-skip = (st.session_state.task_page - 1) * PAGE_SIZE
+# ── Fetch all tasks ──
 try:
-    # For simplicity, we just fetch the current page. 
-    # In a real app we'd want total_count from backend for pagination limits.
-    # We will fetch PAGE_SIZE + 1 to know if there's a next page.
-    fetched_tasks = api_client.get_tasks(TOKEN, skip=skip, limit=PAGE_SIZE + 1)
-    
-    has_next = len(fetched_tasks) > PAGE_SIZE
-    page_tasks = fetched_tasks[:PAGE_SIZE]
-    st.session_state.page_tasks = page_tasks
+    all_tasks = api_client.get_tasks(TOKEN, limit=1000)
 except APIError as e:
     st.error(f"Failed to load tasks: {e}")
-    page_tasks = []
-    has_next = False
-    st.session_state.page_tasks = []
+    all_tasks = []
 
 # Fetch users for the "assign to" dropdown (admin/manager only)
 users_list = []
@@ -99,23 +91,32 @@ if USER.get("role") in ("admin", "manager"):
     if st.button("＋ New Task", type="primary"):
         create_task_dialog()
 
-st.caption(f"Showing tasks (Page {st.session_state.task_page})")
+# ── Split into pending vs completed ──
+pending_tasks = [t for t in all_tasks if t.get("status") != "completed"]
+completed_tasks = [t for t in all_tasks if t.get("status") == "completed"]
 
-@st.fragment
-def render_tasks(page_tasks, has_next):
-    # ── Task Cards ──
-    render_task_cards(page_tasks, key_prefix="task_card", on_click=show_task_panel)
+# ── Tabs ────────────────────────────────────────────────────────────
+tab_pending, tab_completed = st.tabs([
+    f"Pending ({len(pending_tasks)})",
+    f"Completed ({len(completed_tasks)})",
+])
 
-    # Pagination controls
-    st.markdown("<br>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c1:
-        if st.session_state.task_page > 1:
-            if st.button("← Previous", use_container_width=True):
-                st.session_state.task_page -= 1
-    with c3:
-        if has_next:
-            if st.button("Next →", use_container_width=True):
-                st.session_state.task_page += 1
+with tab_pending:
+    skip = (st.session_state.pending_task_page - 1) * PAGE_SIZE
+    page_tasks = pending_tasks[skip : skip + PAGE_SIZE]
+    st.caption(f"Showing {len(page_tasks)} of {len(pending_tasks)} pending tasks")
+    if page_tasks:
+        render_task_cards(page_tasks, key_prefix="pending_task_card", on_click=show_task_panel)
+        render_pagination(len(pending_tasks), "pending_task_page", page_size=PAGE_SIZE)
+    else:
+        st.info("No pending tasks found.")
 
-render_tasks(page_tasks, has_next)
+with tab_completed:
+    skip = (st.session_state.completed_task_page - 1) * PAGE_SIZE
+    page_tasks = completed_tasks[skip : skip + PAGE_SIZE]
+    st.caption(f"Showing {len(page_tasks)} of {len(completed_tasks)} completed tasks")
+    if page_tasks:
+        render_task_cards(page_tasks, key_prefix="completed_task_card", on_click=show_task_panel)
+        render_pagination(len(completed_tasks), "completed_task_page", page_size=PAGE_SIZE)
+    else:
+        st.info("No completed tasks found.")

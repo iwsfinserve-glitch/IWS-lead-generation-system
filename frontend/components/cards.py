@@ -41,11 +41,11 @@ def render_lead_card(lead: dict, *, key_prefix: str = "card") -> bool:
     html_str = f'''<div class="overlay-trigger" style="display:flex;border:1px solid rgba(54,57,62,0.3);
     border-radius:6px;margin-bottom:12px;overflow:hidden;height:75px;transition:transform 0.15s ease;
     background:white;"><div style="flex:1;padding:12px 16px;"><div style="display:flex;align-items:baseline;gap:10px;">
-    <span style="color:#333;font-size:1.2rem;font-weight:600;line-height:1.2;">{safe_name}</span><span style="color:#666;
+    <span style="color:#333;font-size:1.1rem;font-weight:600;line-height:1.2;">{safe_name}</span><span style="color:#666;
     font-size:0.85rem;font-weight:400;line-height:1.2;">{safe_prof}</span></div><div style="margin-top:4px;">
     <span style="color:#777;font-size:0.8rem;font-weight:400;line-height:1.2;">Source: {safe_source} | Rep: {safe_rep}</span>
     </div></div><div style="display:flex;align-items:center;justify-content:center;background:{s["bg"]};min-width:64px;padding:0 14px;">
-    <span style="color:white;font-size:0.9rem;font-weight:600;">{s["abbr"]}</span></div></div>'''
+    <span style="color:white;font-size:0.85rem;font-weight:600;">{s["abbr"]}</span></div></div>'''
     st.markdown(html_str, unsafe_allow_html=True)
 
     return st.button("Select", key=f"{key_prefix}_{lead['id']}", use_container_width=True)
@@ -99,13 +99,13 @@ def render_task_card(task: dict, *, key_prefix: str = "task_card") -> bool:
             border: 1px solid rgba(54,57,62,0.3);
             border-radius: 6px;
             margin-bottom: 12px;
-            height: 65px;
+            height: 75px;
             transition: all 0.2s;
             background: white;
         ">
-            <div style="flex:1; padding:10px 16px;">
+            <div style="flex:1; padding:12px 16px; min-width:0; overflow:hidden;">
                 <div style="display:flex; align-items:baseline; gap:10px;">
-                    <span style="color:#333; font-size:1.1rem; font-weight:600; line-height:1.2;">
+                    <span style="color:#333; font-size:1.1rem; font-weight:600; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; width:100%;">
                         {safe_title}
                     </span>
                 </div>
@@ -120,9 +120,9 @@ def render_task_card(task: dict, *, key_prefix: str = "task_card") -> bool:
             </div>
             <div style="
                 display:flex; align-items:center; justify-content:center;
-                background: {s['bg']}; min-width:50px; padding:0 12px;
+                background: {s['bg']}; min-width:64px; padding:0 14px;
             ">
-                <span style="color:white; font-size:0.75rem; font-weight:600;">
+                <span style="color:white; font-size:0.85rem; font-weight:600;">
                     {s['abbr']}
                 </span>
             </div>
@@ -167,12 +167,12 @@ def render_appointment_card(appt: dict, *, key_prefix: str = "appt_card") -> boo
             transition: all 0.2s;
             background: white;
         ">
-            <div style="flex:1; padding:12px 16px;">
-                <div style="display:flex; align-items:baseline; justify-content:space-between;">
-                    <span style="color:#333; font-size:1.1rem; font-weight:600; line-height:1.2;">
+            <div style="flex:1; padding:12px 16px; min-width:0; overflow:hidden;">
+                <div style="display:flex; align-items:baseline; justify-content:space-between; gap:8px;">
+                    <span style="color:#333; font-size:1.1rem; font-weight:600; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0;">
                         {safe_title}
                     </span>
-                    <span style="color:#555; font-size:0.85rem; font-weight:500;">
+                    <span style="color:#555; font-size:0.85rem; font-weight:500; white-space:nowrap; flex-shrink:0;">
                         {time_str}
                     </span>
                 </div>
@@ -181,7 +181,7 @@ def render_appointment_card(appt: dict, *, key_prefix: str = "appt_card") -> boo
                         Date: {day_str}
                     </span>
                     <span style="color:#777; font-size:0.9rem; font-weight:500;">
-                       &nbsp;|&nbsp; Lead: {safe_lead} &nbsp;|&nbsp; {safe_location}
+                       &nbsp;|&nbsp; Lead: {safe_lead}
                     </span>
                 </div>
             </div>
@@ -240,7 +240,7 @@ def render_user_card(
     else:
         admin_buttons_html = ''
 
-    html_str = f'<div class="overlay-trigger user-card-html" style="display:flex;border:1px solid rgba(54,57,62,0.3);border-radius:6px;margin-bottom:12px;overflow:hidden;height:75px;transition:transform 0.15s ease;background:white;"><div style="flex:1;padding:12px 16px;"><div style="display:flex;align-items:baseline;gap:10px;"><span style="color:#333;font-size:1.2rem;font-weight:600;line-height:1.2;">{safe_name}</span><span style="color:#666;font-size:0.85rem;font-weight:400;line-height:1.2;">{safe_email}</span></div><div style="margin-top:4px;"><span style="color:#777;font-size:0.8rem;font-weight:400;line-height:1.2;">Role: {safe_role}</span></div></div>{admin_buttons_html}<div style="display:flex;align-items:center;justify-content:center;background:#555;min-width:64px;padding:0 14px;"><span style="color:white;font-size:0.9rem;font-weight:600;">{safe_role[0]}</span></div></div>'
+    html_str = f'<div class="overlay-trigger user-card-html" style="display:flex;border:1px solid rgba(54,57,62,0.3);border-radius:6px;margin-bottom:12px;overflow:hidden;height:75px;transition:transform 0.15s ease;background:white;"><div style="flex:1;padding:12px 16px;"><div style="display:flex;align-items:baseline;gap:10px;"><span style="color:#333;font-size:1.1rem;font-weight:600;line-height:1.2;">{safe_name}</span><span style="color:#666;font-size:0.85rem;font-weight:400;line-height:1.2;">{safe_email}</span></div><div style="margin-top:4px;"><span style="color:#777;font-size:0.8rem;font-weight:400;line-height:1.2;">Role: {safe_role}</span></div></div>{admin_buttons_html}<div style="display:flex;align-items:center;justify-content:center;background:#555;min-width:64px;padding:0 14px;"><span style="color:white;font-size:0.85rem;font-weight:600;">{safe_role[0]}</span></div></div>'
     st.markdown(html_str, unsafe_allow_html=True)
 
     if is_admin:

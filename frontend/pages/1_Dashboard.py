@@ -7,8 +7,8 @@ from core.state import state
 from core.api_client import APIError
 from core.styles import inject_global_styles
 from components.layout import render_sidebar, render_pagination
-from components.modals import show_lead_panel, metric_card, STATUS_DISPLAY
-from components.cards import render_lead_card, render_lead_cards, render_user_cards
+from components.modals import show_lead_panel, metric_card, STATUS_DISPLAY, create_lead_dialog, show_appointment_panel, show_task_panel
+from components.cards import render_lead_card, render_lead_cards, render_user_cards, render_appointment_cards, render_task_cards
 
 st.set_page_config(
     page_title="Lead Management System",
@@ -28,7 +28,8 @@ USER = state.user or {}
 render_sidebar(key_suffix="dash")
 
 # ── Page Header ──
-st.title("Lead Management System")
+user_name = USER.get("name", "")
+st.title(f"Welcome, {user_name}" if user_name else "Welcome")
 st.markdown('<hr style="height:1px;background:#d4d4d4; margin-bottom: 10px; margin-top: 0px;">', unsafe_allow_html=True)
 st.markdown('<h2 style="margin-bottom: 10px;">Dashboard</h2>', unsafe_allow_html=True)
 
@@ -53,6 +54,7 @@ def get_leads_data():
 
 @st.fragment
 def render_sales_rep_dashboard():
+
     all_leads, page_leads = get_leads_data()
     total = len(all_leads)
     new = len([l for l in all_leads if l["status"] == "new"])
@@ -70,34 +72,95 @@ def render_sales_rep_dashboard():
         """,
         unsafe_allow_html=True,
     )
-    render_filters_and_leads(all_leads)
+    render_filters_and_leads(all_leads, show_rep_filter=False)
+
+    # ── Upcoming Appointments & Pending Tasks side-by-side ──
+    st.markdown("<br>", unsafe_allow_html=True)
+    col_appts, col_tasks = st.columns(2)
+
+    with col_appts:
+        st.subheader("Upcoming Appointments")
+        st.markdown('<hr style="height:1px;background:#d4d4d4; margin-bottom: 10px; margin-top: 0px;">', unsafe_allow_html=True)
+
+        try:
+            appts = api_client.get_appointments(TOKEN)
+            from datetime import datetime as dt
+            now = dt.now().isoformat()
+            upcoming = sorted(
+                [a for a in appts if a["start_time"] >= now],
+                key=lambda a: a["start_time"],
+            )[:5]
+            if upcoming:
+                render_appointment_cards(upcoming, key_prefix="dash_appt", on_click=show_appointment_panel)
+            else:
+                st.caption("No upcoming appointments.")
+        except APIError as e:
+            st.error(f"Failed to load appointments: {e}")
+
+    with col_tasks:
+        st.subheader("Pending Tasks")
+        st.markdown('<hr style="height:1px;background:#d4d4d4; margin-bottom: 10px; margin-top: 0px;">', unsafe_allow_html=True)
+
+        try:
+            tasks = api_client.get_tasks(TOKEN, limit=100)
+            pending = [t for t in tasks if t.get("status") == "needsAction"][:5]
+            if pending:
+                render_task_cards(pending, key_prefix="dash_task", on_click=show_task_panel)
+            else:
+                st.caption("No pending tasks.")
+        except APIError as e:
+            st.error(f"Failed to load tasks: {e}")
 
 @st.fragment
-def render_filters_and_leads(all_leads):
     # ── Filters ──
+def render_filters_and_leads(all_leads, show_rep_filter=True):
     st.subheader("All Leads")
+    st.markdown('<hr style="height:1px;background:#d4d4d4; margin-bottom: 10px; margin-top: 0px;">', unsafe_allow_html=True)
 
-    # Get unique assigned reps and sources from the leads data
-    rep_names = sorted(set(l.get("assigned_rep_name", "") for l in all_leads if l.get("assigned_rep_name")))
-
-    filter_col1, filter_col2, filter_col3 = st.columns(3)
-    with filter_col1:
-        status_filter = st.multiselect(
-            "Status Filter",
-            options=list(STATUS_DISPLAY.values()),
-        )
-    with filter_col2:
-        rep_filter = st.multiselect(
-            "Filter by rep",
-            options=rep_names,
-        )
-    with filter_col3:
-        search_term = st.text_input("Search by Name", value="", placeholder="Enter Name here")
+    rep_filter = []
+    source_names = sorted(set(l.get("source_name", "") for l in all_leads if l.get("source_name")))
+    if show_rep_filter:
+        # Get unique assigned reps from the leads data
+        rep_names = sorted(set(l.get("assigned_rep_name", "") for l in all_leads if l.get("assigned_rep_name")))
+        filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
+        with filter_col1:
+            status_filter = st.multiselect(
+                "Status Filter",
+                options=list(STATUS_DISPLAY.values()),
+            )
+        with filter_col2:
+            source_filter = st.multiselect(
+                "Filter by Source",
+                options=source_names,
+            )
+        with filter_col3:
+            rep_filter = st.multiselect(
+                "Filter by rep",
+                options=rep_names,
+            )
+        with filter_col4:
+            search_term = st.text_input("Search by Name", value="", placeholder="Enter Name here")
+    else:
+        filter_col1, filter_col2, filter_col3 = st.columns(3)
+        with filter_col1:
+            status_filter = st.multiselect(
+                "Status Filter",
+                options=list(STATUS_DISPLAY.values()),
+            )
+        with filter_col2:
+            source_filter = st.multiselect(
+                "Filter by Source",
+                options=source_names,
+            )
+        with filter_col3:
+            search_term = st.text_input("Search by Name", value="", placeholder="Enter Name here")
 
     filtered_leads = all_leads
     if status_filter:
         api_statuses = [k for k, v in STATUS_DISPLAY.items() if v in status_filter]
         filtered_leads = [l for l in filtered_leads if l["status"] in api_statuses]
+    if source_filter:
+        filtered_leads = [l for l in filtered_leads if l.get("source_name") in source_filter]
     if rep_filter:
         filtered_leads = [l for l in filtered_leads if l.get("assigned_rep_name") in rep_filter]
     if search_term:
@@ -112,10 +175,12 @@ def render_filters_and_leads(all_leads):
     total_pages = (len(filtered_leads) // PAGE_SIZE) + (1 if len(filtered_leads) % PAGE_SIZE > 0 else 0)
 
     st.caption(f"Showing {len(paginated_filtered_leads)} of {len(filtered_leads)} leads (Page {st.session_state.lead_page} of {total_pages})")
+    if st.button("＋ Create New Lead", type="primary"):
+        create_lead_dialog()
 
     render_lead_cards(paginated_filtered_leads, key_prefix="card", on_click=show_lead_panel)
             
-    render_pagination(len(filtered_leads), "lead_page", page_size=10)
+    # render_pagination(len(filtered_leads), "lead_page", page_size=10)
 
 
 def delete_user_handler(user_id):
@@ -177,7 +242,7 @@ def render_manager_dashboard():
 </div>
             """, unsafe_allow_html=True
         )
-        st.subheader(f"Directory ({len(my_reps)})")
+        st.subheader(f"Sales Representatives ({len(my_reps)})")
         render_user_cards(my_reps, key_prefix="mgr_user", is_admin=False)
     except APIError as e:
         st.error(f"Failed to fetch users: {e}")

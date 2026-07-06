@@ -351,3 +351,91 @@ def show_appointment_panel(appt_id: int) -> None:
             except APIError as e:
                 st.error(f"Delete failed: {e}")
 
+
+# ── Create Lead Dialog ───────────────────────────────────────────────
+@st.dialog("Create New Lead", width="medium")
+def create_lead_dialog() -> None:
+    """Dialog for creating a new lead.
+
+    - Sales reps: the lead is auto-assigned to themselves (no rep dropdown).
+    - Admins/Managers: a dropdown lets them pick which sales rep to assign.
+    """
+    user = state.user or {}
+    user_role = user.get("role", "sales_rep")
+    token = state.token
+
+    with st.form("create_lead_form", clear_on_submit=True):
+        name = st.text_input("Lead Name *", placeholder="e.g. Ramesh Sharma")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            profession = st.text_input("Profession", placeholder="e.g. Business Owner")
+        with col2:
+            email = st.text_input("Email", placeholder="e.g. ramesh@example.com")
+
+        col3, col4 = st.columns(2)
+        with col3:
+            phone = st.text_input("Phone Number", placeholder="e.g. 9876543210")
+        with col4:
+            # Lead source dropdown
+            try:
+                sources = api_client.get_sources(token)
+                source_options = {s["id"]: s["name"] for s in sources}
+                source_options_list = list(source_options.keys())
+                source_id = st.selectbox(
+                    "Lead Source",
+                    options=[None] + source_options_list,
+                    format_func=lambda x: "Select Source" if x is None else source_options[x],
+                )
+            except APIError:
+                source_id = None
+                st.caption("Could not load sources.")
+
+        address = st.text_input("Address", placeholder="e.g. Panaji, Goa")
+
+        # Assign-to dropdown: only for admin/manager
+        assigned_rep_id = None
+        if user_role in ("admin", "manager"):
+            try:
+                all_users = api_client.get_users(token)
+                reps = [u for u in all_users if u["role"] == "sales_rep"]
+                rep_options = {u["id"]: u["name"] for u in reps}
+                rep_options_list = list(rep_options.keys())
+                assigned_rep_id = st.selectbox(
+                    "Assign to Sales Rep",
+                    options=[None] + rep_options_list,
+                    format_func=lambda x: "Unassigned" if x is None else rep_options[x],
+                )
+            except APIError:
+                st.caption("Could not load sales reps.")
+
+        submitted = st.form_submit_button("Create Lead", use_container_width=True, type="primary")
+        if submitted:
+            if not name.strip():
+                st.error("Lead name is required.")
+                return
+
+            data = {"name": name.strip()}
+            if profession and profession.strip():
+                data["profession"] = profession.strip()
+            if email and email.strip():
+                data["email"] = email.strip()
+            if phone and phone.strip():
+                data["phone_number"] = phone.strip()
+            if address and address.strip():
+                data["address"] = address.strip()
+            if source_id is not None:
+                data["source_id"] = source_id
+
+            # Auto-assign for sales reps
+            if user_role == "sales_rep":
+                data["assigned_rep_id"] = user.get("id")
+            elif assigned_rep_id is not None:
+                data["assigned_rep_id"] = assigned_rep_id
+
+            try:
+                api_client.create_lead(token, data)
+                st.toast("Lead created successfully!")
+                st.rerun()
+            except APIError as e:
+                st.error(f"Failed to create lead: {e}")

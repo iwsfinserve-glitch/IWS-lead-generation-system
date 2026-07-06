@@ -7,7 +7,7 @@ from core import api_client
 from core.api_client import APIError
 from core.state import state
 from core.styles import inject_global_styles
-from components.layout import render_sidebar
+from components.layout import render_sidebar, render_pagination
 from components.cards import render_appointment_cards
 from components.modals import show_appointment_panel
 
@@ -121,6 +121,12 @@ if "cal_year" not in st.session_state:
     st.session_state.cal_year = datetime.now().year
 if "cal_month" not in st.session_state:
     st.session_state.cal_month = datetime.now().month
+if "upcoming_appt_page" not in st.session_state:
+    st.session_state.upcoming_appt_page = 1
+if "previous_appt_page" not in st.session_state:
+    st.session_state.previous_appt_page = 1
+
+PAGE_SIZE = 10
 
 # ── Page Header ──
 st.title("Appointments")
@@ -145,9 +151,34 @@ if "pending_appt_id" in st.session_state and st.session_state.pending_appt_id:
 # LIST VIEW
 # =====================================================
 if view == "List View":
-    sorted_appts = sorted(appointments, key=lambda a: a["start_time"])
+    now_iso = datetime.now().isoformat()
+    upcoming_appts = sorted([a for a in appointments if a["start_time"] >= now_iso], key=lambda a: a["start_time"])
+    previous_appts = sorted([a for a in appointments if a["start_time"] < now_iso], key=lambda a: a["start_time"], reverse=True)
 
-    render_appointment_cards(sorted_appts, key_prefix="appt_card", on_click=show_appointment_panel)
+    tab_upcoming, tab_previous = st.tabs([
+        f"Upcoming ({len(upcoming_appts)})",
+        f"Previous ({len(previous_appts)})",
+    ])
+
+    with tab_upcoming:
+        skip = (st.session_state.upcoming_appt_page - 1) * PAGE_SIZE
+        page_appts = upcoming_appts[skip : skip + PAGE_SIZE]
+        st.caption(f"Showing {len(page_appts)} of {len(upcoming_appts)} upcoming appointments")
+        if page_appts:
+            render_appointment_cards(page_appts, key_prefix="upcoming_appt_card", on_click=show_appointment_panel)
+            render_pagination(len(upcoming_appts), "upcoming_appt_page", page_size=PAGE_SIZE)
+        else:
+            st.info("No upcoming appointments found.")
+
+    with tab_previous:
+        skip = (st.session_state.previous_appt_page - 1) * PAGE_SIZE
+        page_appts = previous_appts[skip : skip + PAGE_SIZE]
+        st.caption(f"Showing {len(page_appts)} of {len(previous_appts)} previous appointments")
+        if page_appts:
+            render_appointment_cards(page_appts, key_prefix="previous_appt_card", on_click=show_appointment_panel)
+            render_pagination(len(previous_appts), "previous_appt_page", page_size=PAGE_SIZE)
+        else:
+            st.info("No previous appointments found.")
 
 # =====================================================
 # CALENDAR VIEW
