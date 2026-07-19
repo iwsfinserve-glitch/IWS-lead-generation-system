@@ -5,7 +5,7 @@ from core.auth import save_token_cookie, controller, COOKIE_NAME
 from core.state import state
 from core.styles import inject_global_styles
 
-st.set_page_config(page_title="Login — Lead Management", page_icon="", layout="wide")
+st.set_page_config(page_title="Login - Lead Management", page_icon="", layout="wide")
 
 inject_global_styles()
 
@@ -14,7 +14,7 @@ inject_global_styles()
 if state.token:
     user_info = state.user or {}
     st.success(f"Already logged in as **{user_info.get('name', '')}** ({user_info.get('role', '')})")
-    st.page_link("pages/1_Dashboard.py", label="Go to Dashboard", icon="📊")
+    st.page_link("pages/1_Dashboard.py", label="Go to Dashboard")
     st.stop()
 
 # Try cookie recovery

@@ -1,0 +1,107 @@
+.venv
+.gitignore
+__pycache__
+implementation_plan.md
+architecture_report.md
+security_report.md
+frontend_refactoring_report.md
+frontend_improvement_plan.md
+test.py
+seed.py
+test_login.py
+.env
+.pytest_cache/
+/*.md
+/PROJECT_ARCHITECTURE_AND_FEATURES.md
+/dynamic_config_implementation_plan.md
+
+# ==========================================
+# Environment variables and secrets
+# ==========================================
+.env
+.env.*
+!.env.example
+
+# ==========================================
+# Virtual environments
+# ==========================================
+.venv/
+venv/
+env/
+ENV/
+
+# ==========================================
+# Python bytecode and cache
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ==========================================
+# Pytest
+# ==========================================
+.pytest_cache/
+
+# ==========================================
+# Coverage reports
+# ==========================================
+.coverage
+.coverage.*
+htmlcov/
+
+# ==========================================
+# Type checker caches
+# ==========================================
+.mypy_cache/
+.pyright/
+.ruff_cache/
+
+# ==========================================
+# Build and packaging
+# ==========================================
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# ==========================================
+# Logs
+# ==========================================
+*.log
+
+# ==========================================
+# Database files (SQLite)
+# ==========================================
+*.db
+*.sqlite3
+
+# ==========================================
+# IDE files
+# ==========================================
+
+# PyCharm
+.idea/
+
+# ==========================================
+# Operating system files
+# ==========================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==========================================
+# Temporary files
+# ==========================================
+*.tmp
+*.temp
+
+# ==========================================
+# Testing artifacts
+# ==========================================
+.cache/
+
+# ==========================================
+# Ignore local configuration
+# ==========================================
+local_settings.py

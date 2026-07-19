@@ -5,14 +5,14 @@ LeadSource — categorises how a lead was acquired (e.g. Walk-in, SEO).
 Lead       — an individual prospect tracked through the sales pipeline.
 
 Status lifecycle:
-    new → in_progress → potential → converted_to_investor
+    new → in_progress → potential → converted_to_investor → existing_investor (monthly rollover)
                       ↘ non_potential
 """
 
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
-    Integer, String, Enum, Date, DateTime, ForeignKey, Text,
+    Integer, String, Enum, Date, DateTime, ForeignKey, Text, Float,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -98,6 +98,22 @@ class Lead(Base):
     )
     appointments: Mapped[list["Appointment"]] = relationship(         # noqa: F821
         "Appointment", back_populates="lead",
+        cascade="all, delete-orphan", lazy="selectin",
+    )
+
+    # ── Denormalized AI score cache (updated by POST /leads/{id}/ai/score) ──
+    # Stored directly on Lead so list views can sort/filter without a join.
+    ai_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_score_label: Mapped[str | None] = mapped_column(
+        String(10), nullable=True,
+        comment="'hot' | 'warm' | 'cold' — mirrors latest LeadAIInsight.payload.label",
+    )
+    ai_score_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
+    ai_insights: Mapped[list["LeadAIInsight"]] = relationship(         # noqa: F821
+        "LeadAIInsight", back_populates="lead",
         cascade="all, delete-orphan", lazy="selectin",
     )
 

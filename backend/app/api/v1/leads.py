@@ -2,7 +2,7 @@
 Lead routes — CRUD with RBAC filtering and automatic timeline logging.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from app.schemas.lead import (
     LeadTimelineCreate, LeadTimelineRead,
 )
 from app.api.dependencies import get_current_user, require_roles
+from app.services.ai_sync import trigger_ai_analysis_background
 
 router = APIRouter(prefix="/leads", tags=["Leads"])
 
@@ -105,6 +106,7 @@ async def get_lead(
 ):
     """Get a single lead with RBAC check."""
     lead = await _get_lead_or_404(lead_id, db)
+    _check_lead_access(lead, current_user)
     return LeadRead.from_orm_lead(lead)
 
 
@@ -112,6 +114,7 @@ async def get_lead(
 async def update_lead(
     lead_id: int,
     payload: LeadUpdate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -131,12 +134,13 @@ async def update_lead(
             user_id=current_user.id,
             event_type="status_change",
             event_metadata={
-                "old_status": old_status.value,
-                "new_status": update_data["status"].value,
+                "old_status": old_status.value if old_status else None,
+                "new_status": update_data["status"].value if hasattr(update_data["status"], "value") else update_data["status"],
                 "changed_by": current_user.name,
             },
         )
         db.add(timeline_entry)
+        background_tasks.add_task(trigger_ai_analysis_background, lead.id)
 
     await db.commit()
     await db.refresh(lead)
@@ -149,10 +153,11 @@ async def delete_lead(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles("admin")),
 ):
-    """Delete a lead (cascades to timeline and appointments). Admin only."""
+    """Delete a lead. Admin only."""
     lead = await _get_lead_or_404(lead_id, db)
     await db.delete(lead)
     await db.commit()
+    return None
 
 
 @router.get("/{lead_id}/timeline", response_model=list[LeadTimelineRead])
@@ -163,6 +168,7 @@ async def get_lead_timeline(
 ):
     """Get the full audit timeline for a lead."""
     lead = await _get_lead_or_404(lead_id, db)
+    _check_lead_access(lead, current_user)
 
     result = await db.execute(
         select(LeadTimeline)
@@ -177,6 +183,7 @@ async def get_lead_timeline(
 async def add_timeline_entry(
     lead_id: int,
     payload: LeadTimelineCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -191,6 +198,24 @@ async def add_timeline_entry(
         event_metadata=payload.event_metadata,
     )
     db.add(entry)
+    background_tasks.add_task(trigger_ai_analysis_background, lead_id)
     await db.commit()
     await db.refresh(entry)
     return LeadTimelineRead.from_orm_timeline(entry)
+
+
+@router.post("/rollover", status_code=status.HTTP_200_OK)
+async def trigger_rollover(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles("admin")),
+):
+    """Manually trigger the monthly rollover (admin only).
+
+    Converts all 'converted_to_investor' leads to 'existing_investor'
+    and logs a status_change timeline entry for each.
+    """
+    from app.services.rollover import run_monthly_rollover
+
+    count = await run_monthly_rollover(db)
+    return {"rolled_over": count}
+

@@ -25,3 +25,6 @@ class Base(DeclarativeBase):
 from app.models.user import User                       # noqa: E402, F401
 from app.models.lead import LeadSource, Lead            # noqa: E402, F401
 from app.models.interaction import LeadTimeline, Appointment, Task  # noqa: E402, F401
+from app.models.interaction import TaskDueDateRequest, Notification  # noqa: E402, F401
+from app.models.interaction import LeadTransferRequest               # noqa: E402, F401
+from app.models.ai_insight import LeadAIInsight                      # noqa: E402, F401

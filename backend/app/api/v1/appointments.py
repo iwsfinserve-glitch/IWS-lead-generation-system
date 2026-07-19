@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.db.base import User, Lead, Appointment, LeadTimeline
 from app.schemas.appointment import AppointmentCreate, AppointmentRead, AppointmentUpdate
 from app.api.dependencies import get_current_user
+from app.services.ai_sync import trigger_ai_analysis_background
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
 
@@ -73,6 +74,7 @@ async def create_appointment(
     if current_user.google_refresh_token:
         from app.services.google_sync import sync_appointment_to_calendar
         background_tasks.add_task(sync_appointment_to_calendar, current_user, appointment, "create")
+    background_tasks.add_task(trigger_ai_analysis_background, payload.lead_id)
 
     return AppointmentRead.from_orm_appointment(appointment)
 
@@ -113,6 +115,8 @@ async def update_appointment(
     if current_user.google_refresh_token and appointment.google_event_id:
         from app.services.google_sync import sync_appointment_to_calendar
         background_tasks.add_task(sync_appointment_to_calendar, current_user, appointment, "update")
+    if changes:
+        background_tasks.add_task(trigger_ai_analysis_background, appointment.lead_id)
 
     return AppointmentRead.from_orm_appointment(appointment)
 
@@ -143,3 +147,4 @@ async def delete_appointment(
     if current_user.google_refresh_token and google_event_id:
         from app.services.google_sync import delete_calendar_event
         background_tasks.add_task(delete_calendar_event, current_user, google_event_id)
+    background_tasks.add_task(trigger_ai_analysis_background, appointment.lead_id)

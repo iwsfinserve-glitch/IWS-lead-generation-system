@@ -5,7 +5,11 @@ Uses pydantic-settings to load values from the .env file at the backend root.
 Every other module imports `settings` from here instead of reading env vars directly.
 """
 
+import logging
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_config_logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -24,6 +28,23 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
 
+    @field_validator("SECRET_KEY", mode="before")
+    @classmethod
+    def validate_secret_key(cls, v: str) -> str:
+        """Strip whitespace and warn if the key is too short for production."""
+        v = v.strip()
+        if len(v) < 4:
+            raise ValueError(
+                "SECRET_KEY must be at least 4 characters. "
+                "Generate a strong key with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+            )
+        if len(v) < 32:
+            _config_logger.warning(
+                "SECRET_KEY is shorter than 32 characters. "
+                "This is insecure for production — consider using a stronger key."
+            )
+        return v
+
     # ── Google OAuth 2.0 (Workspace calendar/task sync) ────────────────
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
@@ -34,6 +55,16 @@ class Settings(BaseSettings):
 
     # ── Gemini AI (report generation) ──────────────────────────────────
     GEMINI_API_KEY: str = ""
+
+    # ── CORS ───────────────────────────────────────────────────────────
+    # Comma-separated list of allowed origins. Default permits the local
+    # Streamlit dev server. Override in .env for production.
+    ALLOWED_ORIGINS: str = "http://localhost:8501,http://localhost:8000"
+
+    @property
+    def allowed_origins_list(self) -> list[str]:
+        """Parse the comma-separated ALLOWED_ORIGINS into a list."""
+        return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
     # ── Pydantic-settings config ───────────────────────────────────────
     # Tells pydantic-settings to read from the .env file located one

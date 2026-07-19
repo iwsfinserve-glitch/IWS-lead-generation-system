@@ -15,10 +15,12 @@ Task         — An internal work item assigned to a user, optionally
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
-    Integer, String, Enum, Date, DateTime, ForeignKey, Text,
+    Integer, String, Enum, Date, DateTime, ForeignKey, Text, JSON,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+JSON_VARIANT = JSON().with_variant(JSONB, "postgresql")
 
 from app.db.base import Base
 from app.models.enums import AppointmentMode
@@ -55,7 +57,7 @@ class LeadTimeline(Base):
         comment="e.g. status_change, note_added, appointment_booked, task_created",
     )
     event_metadata: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, default=dict,
+        JSON_VARIANT, nullable=False, default=dict,
         comment="Structured event payload for AI report context",
     )
 
@@ -175,3 +177,147 @@ class Task(Base):
 
     def __repr__(self) -> str:
         return f"<Task id={self.id} title={self.title!r} status={self.status}>"
+
+
+class TaskDueDateRequest(Base):
+    """A request from a sales rep to change a task's due date.
+
+    When a manager assigns a task, the rep cannot freely change the due
+    date. Instead they submit a request here, which the manager can
+    approve or reject. On approval the Task.due column is updated
+    automatically.
+    """
+
+    __tablename__ = "task_due_date_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    task_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    requested_by_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False,
+    )
+    manager_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False,
+    )
+
+    requested_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+
+    status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="pending",
+        comment="pending | approved | rejected",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
+    # ── Relationships ──────────────────────────────────────────────────
+    task: Mapped["Task"] = relationship("Task", lazy="selectin")
+    requester: Mapped["User"] = relationship(                          # noqa: F821
+        "User", foreign_keys=[requested_by_id], lazy="selectin",
+    )
+    manager: Mapped["User"] = relationship(                            # noqa: F821
+        "User", foreign_keys=[manager_id], lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<TaskDueDateRequest id={self.id} task_id={self.task_id} status={self.status}>"
+
+
+class Notification(Base):
+    """Global notification for a user.
+
+    Created automatically when events occur (e.g. due-date request
+    approved/rejected). The frontend shows a bell icon with an unread
+    count badge.
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notification_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_read: Mapped[bool] = mapped_column(default=False, nullable=False)
+
+    link_type: Mapped[str | None] = mapped_column(
+        String(50), nullable=True,
+        comment="Optional entity type for deep-linking, e.g. 'task', 'request'",
+    )
+    link_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+        comment="Optional entity ID for deep-linking",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    # ── Relationships ──────────────────────────────────────────────────
+    user: Mapped["User"] = relationship("User", back_populates="notifications", lazy="selectin")  # noqa: F821
+
+    def __repr__(self) -> str:
+        return f"<Notification id={self.id} user_id={self.user_id} read={self.is_read}>"
+
+
+class LeadTransferRequest(Base):
+    """A request to transfer a lead from one sales rep to another.
+
+    Sales reps submit a transfer request, which managers/admins can
+    approve or reject. On approval, Lead.assigned_rep_id is updated
+    automatically.
+    """
+
+    __tablename__ = "lead_transfer_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    lead_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    from_user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False,
+    )
+    to_user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False,
+    )
+
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="pending",
+        comment="pending | approved | rejected",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    # ── Relationships ──────────────────────────────────────────────────
+    lead: Mapped["Lead"] = relationship("Lead", lazy="selectin")                       # noqa: F821
+    from_user: Mapped["User"] = relationship(                                          # noqa: F821
+        "User", foreign_keys=[from_user_id], lazy="selectin",
+    )
+    to_user: Mapped["User"] = relationship(                                            # noqa: F821
+        "User", foreign_keys=[to_user_id], lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<LeadTransferRequest id={self.id} lead_id={self.lead_id} status={self.status}>"

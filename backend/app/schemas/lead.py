@@ -3,6 +3,7 @@ Pydantic schemas for LeadSource, Lead, and LeadTimeline operations.
 """
 
 from datetime import date, datetime
+from typing import Optional
 from pydantic import BaseModel, Field
 
 from app.models.enums import LeadStatus
@@ -56,6 +57,11 @@ class LeadRead(BaseModel):
     source_name: str | None = None
     assigned_rep_name: str | None = None
 
+    # Denormalized AI score cache — None until first AI analysis run
+    ai_score: float | None = None
+    ai_score_label: str | None = None          # "hot" | "warm" | "cold"
+    ai_score_updated_at: datetime | None = None
+
     model_config = {"from_attributes": True}
 
     @classmethod
@@ -74,6 +80,10 @@ class LeadRead(BaseModel):
             created_at=lead.created_at,
             source_name=lead.source.name if lead.source else None,
             assigned_rep_name=lead.assigned_rep.name if lead.assigned_rep else None,
+            # AI cache columns — safe getattr in case migration hasn't run yet
+            ai_score=getattr(lead, "ai_score", None),
+            ai_score_label=getattr(lead, "ai_score_label", None),
+            ai_score_updated_at=getattr(lead, "ai_score_updated_at", None),
         )
 
 

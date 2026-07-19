@@ -6,8 +6,11 @@ from core import api_client
 from core.state import state
 from core.api_client import APIError
 from core.styles import inject_global_styles
-from components.layout import render_sidebar, render_pagination
-from components.modals import show_lead_panel, metric_card, STATUS_DISPLAY, create_lead_dialog, show_appointment_panel, show_task_panel
+from components.layout import render_sidebar, render_pagination, render_divider
+from components.modals import (
+    metric_card, STATUS_DISPLAY, create_lead_dialog,
+    show_appointment_panel, show_task_panel, manage_user_dialog,
+)
 from components.cards import render_lead_card, render_lead_cards, render_user_cards, render_appointment_cards, render_task_cards
 
 st.set_page_config(
@@ -17,6 +20,13 @@ st.set_page_config(
 )
 
 inject_global_styles(drawer=True, overlay_cards=True, user_cards=True)
+
+
+def navigate_to_lead(lead_id: int, status_color: str = "") -> None:
+    """Navigate to the dedicated Lead Details page."""
+    st.session_state.selected_lead_id = lead_id
+    st.session_state.lead_details_origin = "pages/1_Dashboard.py"
+    st.switch_page("pages/7_Lead_Details.py")
 
 
 require_login()
@@ -30,7 +40,7 @@ render_sidebar(key_suffix="dash")
 # ── Page Header ──
 user_name = USER.get("name", "")
 st.title(f"Welcome, {user_name}" if user_name else "Welcome")
-st.markdown('<hr style="height:1px;background:#d4d4d4; margin-bottom: 10px; margin-top: 0px;">', unsafe_allow_html=True)
+render_divider()
 st.markdown('<h2 style="margin-bottom: 10px;">Dashboard</h2>', unsafe_allow_html=True)
 
 # ── Pagination Setup ──
@@ -46,7 +56,7 @@ def get_leads_data():
         rep_id = user_id if user_role == "sales_rep" else None
         all_leads = api_client.get_leads(TOKEN, assigned_rep_id=rep_id, limit=1000)
         skip = (st.session_state.lead_page - 1) * PAGE_SIZE
-        page_leads = api_client.get_leads(TOKEN, assigned_rep_id=rep_id, skip=skip, limit=PAGE_SIZE)
+        page_leads = all_leads[skip : skip + PAGE_SIZE]
         return all_leads, page_leads
     except APIError as e:
         st.error(f"Failed to load leads: {e}")
@@ -80,7 +90,7 @@ def render_sales_rep_dashboard():
 
     with col_appts:
         st.subheader("Upcoming Appointments")
-        st.markdown('<hr style="height:1px;background:#d4d4d4; margin-bottom: 10px; margin-top: 0px;">', unsafe_allow_html=True)
+        render_divider()
 
         try:
             appts = api_client.get_appointments(TOKEN)
@@ -99,7 +109,7 @@ def render_sales_rep_dashboard():
 
     with col_tasks:
         st.subheader("Pending Tasks")
-        st.markdown('<hr style="height:1px;background:#d4d4d4; margin-bottom: 10px; margin-top: 0px;">', unsafe_allow_html=True)
+        render_divider()
 
         try:
             tasks = api_client.get_tasks(TOKEN, limit=100)
@@ -111,11 +121,11 @@ def render_sales_rep_dashboard():
         except APIError as e:
             st.error(f"Failed to load tasks: {e}")
 
+# ── Filters ──
 @st.fragment
-    # ── Filters ──
 def render_filters_and_leads(all_leads, show_rep_filter=True):
     st.subheader("All Leads")
-    st.markdown('<hr style="height:1px;background:#d4d4d4; margin-bottom: 10px; margin-top: 0px;">', unsafe_allow_html=True)
+    render_divider()
 
     rep_filter = []
     source_names = sorted(set(l.get("source_name", "") for l in all_leads if l.get("source_name")))
@@ -175,10 +185,10 @@ def render_filters_and_leads(all_leads, show_rep_filter=True):
     total_pages = (len(filtered_leads) // PAGE_SIZE) + (1 if len(filtered_leads) % PAGE_SIZE > 0 else 0)
 
     st.caption(f"Showing {len(paginated_filtered_leads)} of {len(filtered_leads)} leads (Page {st.session_state.lead_page} of {total_pages})")
-    if st.button("＋ Create New Lead", type="primary"):
+    if st.button("Create New Lead", type="primary"):
         create_lead_dialog()
 
-    render_lead_cards(paginated_filtered_leads, key_prefix="card", on_click=show_lead_panel)
+    render_lead_cards(paginated_filtered_leads, key_prefix="card", on_click=navigate_to_lead)
             
     # render_pagination(len(filtered_leads), "lead_page", page_size=10)
 
@@ -191,43 +201,9 @@ def delete_user_handler(user_id):
     except APIError as e:
         st.error(f"Failed to delete: {e}")
 
-@st.dialog("Manage User")
-def manage_user_dialog(user=None):
-    st.markdown(f"<h3>{'Edit User' if user else 'Create User'}</h3>", unsafe_allow_html=True)
-    with st.form("manage_user_form"):
-        name = st.text_input("Name", value=user['name'] if user else "")
-        email = st.text_input("Email", value=user['email'] if user else "")
-        password = st.text_input("Password (leave blank to keep current)" if user else "Password", type="password")
-        role = st.selectbox("Role", ["sales_rep", "manager", "admin"], index=["sales_rep", "manager", "admin"].index(user['role']) if user else 0)
-        
-        try:
-            all_users = api_client.get_users(TOKEN)
-            managers = [u for u in all_users if u['role'] in ['manager', 'admin']]
-            manager_options = {u['id']: u['name'] for u in managers}
-            manager_options[None] = "None"
-            current_manager = user.get('manager_id') if user else None
-            manager_id = st.selectbox("Manager", options=list(manager_options.keys()), format_func=lambda x: manager_options[x], index=list(manager_options.keys()).index(current_manager) if current_manager in manager_options else list(manager_options.keys()).index(None))
-        except:
-            manager_id = None
-        
-        submitted = st.form_submit_button("Save User")
-        if submitted:
-            data = {"name": name, "email": email, "role": role}
-            if manager_id is not None:
-                data["manager_id"] = manager_id
-            if password:
-                data["password"] = password
-                
-            try:
-                if user:
-                    api_client.update_user(TOKEN, user['id'], data)
-                    st.toast("User updated.")
-                else:
-                    api_client.register_user(TOKEN, data)
-                    st.toast("User created.")
-                st.rerun()
-            except APIError as e:
-                st.error(f"Error: {e}")
+def manage_user_dialog_wrapper(user=None):
+    """Wrapper to pass the TOKEN to the shared manage_user_dialog."""
+    manage_user_dialog(TOKEN, user)
 
 def render_manager_dashboard():
     try:
@@ -248,8 +224,8 @@ def render_manager_dashboard():
         st.error(f"Failed to fetch users: {e}")
 
 def render_admin_dashboard():
-    if st.button("＋ Create New User", type="primary"):
-        manage_user_dialog()
+    if st.button("Create New User", type="primary"):
+        manage_user_dialog_wrapper()
     try:
         users = api_client.get_users(TOKEN)
         
@@ -268,7 +244,7 @@ def render_admin_dashboard():
             users,
             key_prefix="adm_user",
             is_admin=True,
-            on_edit=manage_user_dialog,
+            on_edit=manage_user_dialog_wrapper,
             on_delete=delete_user_handler,
         )
     except APIError as e:

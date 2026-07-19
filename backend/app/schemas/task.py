@@ -54,3 +54,10 @@ class TaskUpdate(BaseModel):
     notes: str | None = None
     status: str | None = Field(None, pattern=r"^(needsAction|completed)$")
     due: date | None = None
+
+
+class TaskSelfCreate(BaseModel):
+    """Schema for reps creating tasks assigned to themselves."""
+    title: str = Field(..., min_length=1, max_length=500)
+    notes: str | None = None
+    due: date | None = None

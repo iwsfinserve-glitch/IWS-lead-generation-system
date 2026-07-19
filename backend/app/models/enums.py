@@ -23,9 +23,17 @@ class LeadStatus(str, enum.Enum):
     potential = "potential"
     non_potential = "non_potential"
     converted_to_investor = "converted_to_investor"
+    existing_investor = "existing_investor"
 
 
 class AppointmentMode(str, enum.Enum):
     """Appointment meeting mode."""
     online = "online"
     in_person = "in_person"
+
+
+class DueDateRequestStatus(str, enum.Enum):
+    """Status for task due-date change requests."""
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"

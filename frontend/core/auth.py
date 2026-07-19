@@ -9,10 +9,15 @@ import streamlit as st
 import asyncio
 from streamlit_cookies_controller import CookieController
 from core import api_client
+from core.api_client import APIError, APIConnectionError
 from core.state import state
 
-# Single shared controller instance.
-controller = CookieController()
+@st.cache_resource
+def get_cookie_controller() -> CookieController:
+    return CookieController()
+
+# Single shared controller instance, cached to survive re-runs.
+controller = get_cookie_controller()
 COOKIE_NAME = "lms_auth_token"
 
 def require_login():
@@ -26,7 +31,11 @@ def require_login():
         return
 
     # ── Try to recover from browser cookie ──
-    saved_token = controller.get(COOKIE_NAME)
+    saved_token = None
+    try:
+        saved_token = controller.get(COOKIE_NAME)
+    except Exception:
+        pass
 
     import json
     if saved_token:
@@ -50,7 +59,7 @@ def require_login():
                 try:
                     api_client.get_users(access_token)
                     api_client.get_sources(access_token)
-                except Exception:
+                except (APIError, APIConnectionError):
                     pass
                 
                 if hasattr(st.session_state, '_pending_cookie_update'):
@@ -58,11 +67,11 @@ def require_login():
                     del st.session_state._pending_cookie_update
                     
                 return  # Successfully recovered
-            except Exception:
-                # Token was invalid or expired — clear the stale cookie
+            except (APIError, APIConnectionError):
+                # Token was invalid/expired or backend unreachable — clear stale cookie
                 try:
                     controller.remove(COOKIE_NAME)
-                except (KeyError, AttributeError, Exception):
+                except (KeyError, AttributeError):
                     pass
 
     # ── No valid session — redirect to login ──

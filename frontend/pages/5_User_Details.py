@@ -6,11 +6,18 @@ from core.state import state
 from core.api_client import APIError
 from core.styles import inject_global_styles
 from components.cards import render_lead_cards, render_task_cards, render_appointment_cards
-from components.modals import show_lead_panel, show_task_panel, show_appointment_panel, metric_card
+from components.modals import show_task_panel, show_appointment_panel, metric_card
 
-st.set_page_config(page_title="User Details", page_icon="👤", layout="wide")
+st.set_page_config(page_title="User Details", page_icon="", layout="wide")
 
-inject_global_styles(drawer=True, overlay_cards=True, metric_card=True)
+inject_global_styles(overlay_cards=True, metric_card=True)
+
+
+def navigate_to_lead(lead_id: int, status_color: str = "") -> None:
+    """Navigate to the dedicated Lead Details page."""
+    st.session_state.selected_lead_id = lead_id
+    st.session_state.lead_details_origin = "pages/5_User_Details.py"
+    st.switch_page("pages/7_Lead_Details.py")
 
 require_login()
 
@@ -43,7 +50,7 @@ except APIError as e:
 if st.button("← Back to Dashboard"):
     st.switch_page("pages/1_Dashboard.py")
 
-st.title(f"Profile: {selected_user['name']}")
+st.title(selected_user['name'])
 st.caption(f"{selected_user['role'].replace('_', ' ').title()} — {selected_user['email']}")
 
 active_leads = [l for l in assigned_leads if l["status"] != "converted_to_investor"]
@@ -63,13 +70,13 @@ tab1, tab2, tab3, tab4 = st.tabs([
 
 with tab1:
     if active_leads:
-        render_lead_cards(active_leads, key_prefix="prof_active", on_click=show_lead_panel)
+        render_lead_cards(active_leads, key_prefix="prof_active", on_click=navigate_to_lead)
     else:
         st.info("No active leads assigned to this user.")
 
 with tab2:
     if converted_leads:
-        render_lead_cards(converted_leads, key_prefix="prof_conv", on_click=show_lead_panel)
+        render_lead_cards(converted_leads, key_prefix="prof_conv", on_click=navigate_to_lead)
     else:
         st.info("No converted leads assigned to this user.")
 

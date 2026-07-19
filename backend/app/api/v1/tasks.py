@@ -10,10 +10,40 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.db.base import User, Task
-from app.schemas.task import TaskCreate, TaskRead, TaskUpdate
+from app.schemas.task import TaskCreate, TaskRead, TaskUpdate, TaskSelfCreate
 from app.api.dependencies import get_current_user, require_roles
+from app.services.google_sync import sync_task_to_google, delete_google_task
 
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
+
+
+async def _create_task_record(
+    *,
+    user_id: int,
+    assigned_by: int,
+    title: str,
+    notes: str | None,
+    due: datetime | None,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession,
+    current_user: User,
+) -> TaskRead:
+    """Shared helper that creates a Task record and optionally syncs to Google."""
+    task = Task(
+        user_id=user_id,
+        assigned_by=assigned_by,
+        title=title,
+        notes=notes,
+        due=due,
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+
+    if current_user.google_refresh_token:
+        background_tasks.add_task(sync_task_to_google, current_user, task, "create")
+
+    return TaskRead.from_orm_task(task)
 
 
 @router.get("/", response_model=list[TaskRead])
@@ -26,7 +56,7 @@ async def list_tasks(
 ):
     """List tasks. Sales reps see only tasks assigned to them."""
     query = select(Task)
-    if current_user.role.value == "sales_rep":
+    if current_user.is_sales_rep:
         query = query.where(Task.user_id == current_user.id)
     elif user_id is not None:
         query = query.where(Task.user_id == user_id)
@@ -47,22 +77,36 @@ async def create_task(
     if not target.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Assigned user not found")
 
-    task = Task(
+    return await _create_task_record(
         user_id=payload.user_id,
         assigned_by=current_user.id,
         title=payload.title,
         notes=payload.notes,
         due=payload.due,
+        background_tasks=background_tasks,
+        db=db,
+        current_user=current_user,
     )
-    db.add(task)
-    await db.commit()
-    await db.refresh(task)
 
-    if current_user.google_refresh_token:
-        from app.services.google_sync import sync_task_to_google
-        background_tasks.add_task(sync_task_to_google, current_user, task, "create")
 
-    return TaskRead.from_orm_task(task)
+@router.post("/self", response_model=TaskRead, status_code=status.HTTP_201_CREATED)
+async def create_self_task(
+    payload: TaskSelfCreate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a task assigned to the current user (self-assignment)."""
+    return await _create_task_record(
+        user_id=current_user.id,
+        assigned_by=current_user.id,
+        title=payload.title,
+        notes=payload.notes,
+        due=payload.due,
+        background_tasks=background_tasks,
+        db=db,
+        current_user=current_user,
+    )
 
 
 @router.patch("/{task_id}", response_model=TaskRead)
@@ -78,8 +122,19 @@ async def update_task(
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if current_user.role.value == "sales_rep" and task.user_id != current_user.id:
+    if current_user.is_sales_rep and task.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can only edit your own tasks")
+
+    # Reps cannot change due date on tasks assigned by someone else
+    if (current_user.is_sales_rep
+            and "due" in payload.model_dump(exclude_unset=True)
+            and task.assigned_by is not None
+            and task.assigned_by != current_user.id):
+        raise HTTPException(
+            status_code=403,
+            detail="You cannot change the due date on a manager-assigned task. "
+                   "Please submit a due date change request instead.",
+        )
 
     update_data = payload.model_dump(exclude_unset=True)
     old_status = task.status
@@ -96,7 +151,6 @@ async def update_task(
     await db.refresh(task)
 
     if current_user.google_refresh_token and task.google_task_id:
-        from app.services.google_sync import sync_task_to_google
         background_tasks.add_task(sync_task_to_google, current_user, task, "update")
 
     return TaskRead.from_orm_task(task)
@@ -114,7 +168,7 @@ async def delete_task(
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if current_user.role.value == "sales_rep" and task.user_id != current_user.id:
+    if current_user.is_sales_rep and task.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can only delete your own tasks")
 
     google_task_id = task.google_task_id
@@ -122,5 +176,5 @@ async def delete_task(
     await db.commit()
 
     if current_user.google_refresh_token and google_task_id:
-        from app.services.google_sync import delete_google_task
         background_tasks.add_task(delete_google_task, current_user, google_task_id)
+

@@ -65,6 +65,23 @@ class User(Base):
         "Task", back_populates="assigner",
         foreign_keys="[Task.assigned_by]", lazy="selectin",
     )
+    notifications: Mapped[list["Notification"]] = relationship(        # noqa: F821
+        "Notification", back_populates="user",
+        foreign_keys="[Notification.user_id]", lazy="noload",
+    )
+
+    # ── Role helper properties ────────────────────────────────────────
+    @property
+    def is_sales_rep(self) -> bool:
+        return self.role == UserRole.sales_rep
+
+    @property
+    def is_manager_or_above(self) -> bool:
+        return self.role in (UserRole.manager, UserRole.admin)
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == UserRole.admin
 
     def __repr__(self) -> str:
         return f"<User id={self.id} email={self.email!r} role={self.role.value}>"

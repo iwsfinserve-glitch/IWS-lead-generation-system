@@ -24,13 +24,23 @@ from app.models.lead import LeadSource, Lead
 from app.models.enums import UserRole, LeadStatus
 
 
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import StaticPool
+from app.db.base import Base
 
-# ── Engine (reuses your dev DB, all changes rolled back per test) ─────────────
+# ── Engine (isolated in-memory SQLite database for tests) ─────────────────────
 
-@pytest.fixture(scope="session")
-def engine():
-    return create_async_engine(settings.DATABASE_URL, echo=False, poolclass=NullPool)
+@pytest_asyncio.fixture(scope="session")
+async def engine():
+    test_engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        echo=False,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield test_engine
+    await test_engine.dispose()
 
 
 @pytest.fixture(scope="session")
@@ -66,12 +76,14 @@ async def db_session(engine):
 async def client(db_session):
     """
     AsyncClient wired to your FastAPI app, with get_db overridden
-    to use the isolated test session.
+    to use the isolated test session and rate limiting disabled for tests.
     """
     async def override_get_db():
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
+    was_enabled = getattr(app.state.limiter, "enabled", True)
+    app.state.limiter.enabled = False
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -79,6 +91,7 @@ async def client(db_session):
     ) as ac:
         yield ac
 
+    app.state.limiter.enabled = was_enabled
     app.dependency_overrides.clear()
 
 
@@ -202,11 +215,27 @@ def mock_google_sync():
 
 @pytest.fixture(autouse=True)
 def mock_gemini():
-    with patch("app.services.ai_report_generator.generate_lead_journey_report", new_callable=AsyncMock) as m1, \
-         patch("app.services.ai_report_generator.generate_team_performance_report", new_callable=AsyncMock) as m2, \
-         patch("app.services.ai_report_generator.build_docx_report") as m3:
+    from io import BytesIO
+    fake_docx = BytesIO(b"fake docx content")
+
+    with patch("app.api.v1.reports.generate_lead_journey_report", new_callable=AsyncMock) as m1, \
+         patch("app.api.v1.reports.generate_periodic_leads_report", new_callable=AsyncMock) as m2, \
+         patch("app.api.v1.reports.generate_user_performance_report", new_callable=AsyncMock) as m3, \
+         patch("app.api.v1.reports.generate_team_performance_report", new_callable=AsyncMock) as m4, \
+         patch("app.api.v1.reports.build_docx_report") as m5:
         m1.return_value = "AI narrative for lead journey."
-        m2.return_value = "AI narrative for team performance."
-        from io import BytesIO
-        m3.return_value = BytesIO(b"fake docx content")
-        yield m1, m2, m3
+        m2.return_value = "AI narrative for periodic leads."
+        m3.return_value = "AI narrative for user performance."
+        m4.return_value = "AI narrative for team performance."
+        m5.return_value = BytesIO(b"fake docx content")
+        yield m1, m2, m3, m4, m5
+
+
+@pytest.fixture(autouse=True, scope="session")
+def disable_rate_limiters():
+    """Disable slowapi rate limiters for the test session."""
+    from app.main import limiter as main_limiter
+    from app.api.v1.auth import limiter as auth_limiter
+    main_limiter.enabled = False
+    auth_limiter.enabled = False
+    yield

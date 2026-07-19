@@ -2,10 +2,11 @@
 Auth routes — registration, login, user listing, and Google OAuth connection.
 """
 
+import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
+from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from google_auth_oauthlib.flow import Flow
 from sqlalchemy import select
@@ -23,6 +24,9 @@ from app.schemas.user import UserCreate, UserRead, UserUpdate, Token
 from app.api.dependencies import get_current_user, require_roles
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+
+# Allow OAuth locally over HTTP
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -53,6 +57,7 @@ def _build_google_flow() -> Flow:
             }
         },
         scopes=GOOGLE_SCOPES,
+        autogenerate_code_verifier=False,
     )
 
 
@@ -160,6 +165,23 @@ async def list_users(
 ):
     """List all users. Admin and Manager only."""
     result = await db.execute(select(User).order_by(User.id))
+    users = result.scalars().all()
+    return [UserRead.from_orm_user(u) for u in users]
+
+
+@router.get("/sales-reps", response_model=list[UserRead])
+async def list_sales_reps(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List all users with the sales_rep role. Accessible to any authenticated user.
+
+    Used by the lead transfer form so sales reps can see who they can
+    transfer a lead to without requiring admin/manager privilege.
+    """
+    result = await db.execute(
+        select(User).where(User.role == UserRole.sales_rep).order_by(User.name)
+    )
     users = result.scalars().all()
     return [UserRead.from_orm_user(u) for u in users]
 
@@ -287,12 +309,18 @@ async def google_connect(
 async def google_callback(
     code: str,
     state: str,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     """Handle the redirect from Google after the user grants consent.
 
-    Exchanges the auth code for access + refresh tokens, encrypts them
-    with Fernet, and stores them on the user's DB row.
+    Flow:
+      1. Exchange the auth code for Google access + refresh tokens.
+      2. Encrypt the tokens with Fernet and store them on the user record.
+      3. Kick off a background job to bulk-sync all existing CRM appointments
+         into the user's Google Calendar.
+      4. Redirect the user back to the Streamlit frontend Appointments page
+         with a `google_connected=1` query param so the UI can show a toast.
     """
     flow = _build_google_flow()
     flow.redirect_uri = settings.GOOGLE_REDIRECT_URI
@@ -300,36 +328,68 @@ async def google_callback(
     try:
         flow.fetch_token(code=code)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Token exchange failed: {e}")
+        import logging
+        import urllib.parse
+        logging.error(f"Google OAuth token exchange failed: {e}", exc_info=True)
+        # Redirect to frontend with an error flag and the error message URL-encoded.
+        frontend_url = settings.GOOGLE_REDIRECT_URI.replace(
+            "/api/v1/auth/google/callback", ""
+        ).replace("8000", "8501")
+        error_msg = urllib.parse.quote(str(e))
+        return RedirectResponse(
+            url=f"{frontend_url}/Appointments?google_error=1&error_msg={error_msg}"
+        )
 
     credentials = flow.credentials
 
-    user_id = int(state)
+    # Parse user_id out of the opaque state string.
+    # The state was set to the plain user ID in /google/connect.
+    try:
+        user_id = int(state)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid state parameter")
+
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     user.google_access_token = encrypt_token(credentials.token)
-    user.google_refresh_token = encrypt_token(credentials.refresh_token)
+    # Google only issues a refresh_token on the *first* authorization or when
+    # prompt=consent is used.  Guard against it being None.
+    if credentials.refresh_token:
+        user.google_refresh_token = encrypt_token(credentials.refresh_token)
     if credentials.expiry:
         user.google_token_expiry = credentials.expiry.replace(tzinfo=timezone.utc)
 
     await db.commit()
 
-    return {
-        "message": "Google account connected successfully",
-        "user_id": user.id,
-        "google_connected": True,
-    }
+    # Kick off the bulk back-fill in the background - this does NOT block the redirect.
+    from app.services.google_sync import bulk_sync_all_appointments
+    background_tasks.add_task(bulk_sync_all_appointments, user.id)
+
+    # Determine the Streamlit frontend URL from the configured redirect URI
+    # e.g. http://localhost:8000/api/v1/auth/google/callback
+    #   -> http://localhost:8501
+    frontend_base = (
+        settings.GOOGLE_REDIRECT_URI
+        .split("/api/")[0]           # strip the path
+        .replace(":8000", ":8501")  # swap backend port for frontend port
+    )
+    redirect_target = f"{frontend_base}/Appointments?google_connected=1"
+    return RedirectResponse(url=redirect_target, status_code=302)
 
 
-@router.delete("/google/disconnect")
+@router.delete("/google/disconnect", status_code=status.HTTP_200_OK)
 async def google_disconnect(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Remove stored Google tokens for the current user."""
+    """Remove stored Google tokens for the current user.
+
+    Does NOT revoke the token on Google's side - users should do that via
+    their Google Account security settings if desired.
+    """
     current_user.google_access_token = None
     current_user.google_refresh_token = None
     current_user.google_token_expiry = None
@@ -337,3 +397,42 @@ async def google_disconnect(
     await db.commit()
 
     return {"message": "Google account disconnected", "google_connected": False}
+
+
+@router.get("/google/status")
+async def google_status(
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Return whether the current user has Google Calendar connected.
+
+    Lightweight endpoint - does not hit the Google API.
+    """
+    return {
+        "google_connected": current_user.google_refresh_token is not None,
+        "user_id": current_user.id,
+    }
+
+
+@router.post("/google/sync-appointments", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_google_calendar_sync(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Manually trigger a bulk back-fill of all CRM appointments to Google Calendar.
+
+    Returns immediately (202 Accepted) and performs the sync in the background.
+    Requires the user to have already connected their Google account.
+    """
+    if not current_user.google_refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google Calendar is not connected. Connect via /auth/google/connect first.",
+        )
+
+    from app.services.google_sync import bulk_sync_all_appointments
+    background_tasks.add_task(bulk_sync_all_appointments, current_user.id)
+
+    return {
+        "message": "Calendar sync started in the background.",
+        "user_id": current_user.id,
+    }

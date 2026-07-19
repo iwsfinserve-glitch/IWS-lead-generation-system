@@ -292,3 +292,136 @@ def render_user_cards(
         )
 
 
+def render_notification_card(notif: dict, *, key_prefix: str = "notif_card") -> bool:
+    """Render a single notification as a clean card showing Title and Notification Type.
+
+    Returns True if clicked.
+    """
+    notif_id = notif.get("id", 0)
+    title = bleach.clean(notif.get("title") or "Due Date Change Request")
+    notif_type = bleach.clean(notif.get("notification_type") or "Due Date Change")
+    message = bleach.clean(notif.get("message") or "")
+    created = (notif.get("created_at") or "")[:16].replace("T", " ")
+    is_read = notif.get("is_read", False)
+
+    badge_bg = "#FFC107" if "Request" in notif_type else "#2196F3"
+    border_color = "#ddd" if is_read else "#2196F3"
+
+    html_str = f'''<div class="overlay-trigger" style="display:flex;border:1px solid rgba(54,57,62,0.3);
+    border-left:4px solid {border_color};border-radius:6px;margin-bottom:10px;overflow:hidden;
+    transition:transform 0.15s ease;background:white;"><div style="width:65px;background:{badge_bg};
+    display:flex;flex-direction:column;align-items:center;justify-content:center;color:white;font-weight:700;
+    font-size:0.75rem;padding:6px;text-align:center;">REQ</div><div style="flex:1;padding:12px 16px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;">
+    <span style="color:#333;font-size:1.05rem;font-weight:700;line-height:1.2;">{title}</span>
+    <span style="background:#f0f4f8;color:#0366d6;padding:2px 8px;border-radius:12px;font-size:0.75rem;font-weight:600;">{notif_type}</span>
+    </div><div style="margin-top:4px;color:#555;font-size:0.88rem;">{message}</div>
+    <div style="margin-top:4px;color:#888;font-size:0.75rem;">{created}</div></div></div>'''
+
+    st.markdown(html_str, unsafe_allow_html=True)
+    clicked = st.button("View", key=f"btn_{key_prefix}_{notif_id}", use_container_width=True)
+    return clicked
+
+
+def render_notification_cards(
+    notifications: list[dict],
+    *,
+    key_prefix: str = "notif_card",
+    on_click: Optional[Callable[[int], None]] = None,
+) -> None:
+    """Render a batch of notification cards."""
+    for notif in notifications:
+        clicked = render_notification_card(notif, key_prefix=key_prefix)
+        if clicked and on_click:
+            on_click(notif["id"])
+
+
+def render_request_card(
+    req: dict,
+    *,
+    key_prefix: str = "req_card",
+    title_field: str = "lead_name",
+    subtitle_html: str = "",
+    detail_html: str = "",
+    on_approve: Optional[Callable[[int], None]] = None,
+    on_reject: Optional[Callable[[int], None]] = None,
+) -> None:
+    """Render a pending approval request card with approve/reject buttons.
+
+    This is a reusable card used for both due-date requests (Tasks page)
+    and lead transfer requests (All Leads page).
+
+    Args:
+        req:           Dict with at least 'id', 'created_at', and the title_field key.
+        key_prefix:    Unique prefix for widget keys.
+        title_field:   Key in req to use as the card title.
+        subtitle_html: HTML string for the subtitle line (e.g. "From → To").
+        detail_html:   HTML string for the detail/reason line.
+        on_approve:    Callback(req_id) when Approve is clicked.
+        on_reject:     Callback(req_id) when Reject is clicked.
+    """
+    req_id = req["id"]
+    title = bleach.clean(str(req.get(title_field, f"Request #{req_id}")))
+    created = (req.get("created_at") or "")[:16].replace("T", " ")
+
+    st.markdown(f'''<div style="
+        border: 1px solid rgba(54,57,62,0.2);
+        border-left: 4px solid #FFC107;
+        background: #fffdf0;
+        padding: 16px 20px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+    ">
+        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+            <span style="font-weight:700; font-size:1.05rem; color:#222;">{title}</span>
+            <span style="font-size:0.75rem; color:#888;">{created}</span>
+        </div>
+        {f'<div style="margin-top:8px; font-size:0.9rem; color:#444;">{subtitle_html}</div>' if subtitle_html else ''}
+        {f'<div style="margin-top:6px; font-size:0.85rem; color:#666; font-style:italic;">{detail_html}</div>' if detail_html else ''}
+    </div>''', unsafe_allow_html=True)
+
+    col_approve, col_reject = st.columns(2)
+    with col_approve:
+        if st.button("Approve", key=f"{key_prefix}_approve_{req_id}", use_container_width=True, type="primary"):
+            if on_approve:
+                on_approve(req_id)
+    with col_reject:
+        if st.button("Reject", key=f"{key_prefix}_reject_{req_id}", use_container_width=True):
+            if on_reject:
+                on_reject(req_id)
+    st.markdown("")
+
+
+def render_request_cards(
+    requests: list[dict],
+    *,
+    key_prefix: str = "req_card",
+    title_field: str = "lead_name",
+    subtitle_fn: Optional[Callable[[dict], str]] = None,
+    detail_fn: Optional[Callable[[dict], str]] = None,
+    on_approve: Optional[Callable[[int], None]] = None,
+    on_reject: Optional[Callable[[int], None]] = None,
+) -> None:
+    """Render a list of request cards with approve/reject actions.
+
+    Args:
+        requests:    List of request dicts.
+        key_prefix:  Unique prefix for widget keys.
+        title_field: Key in each request dict to use as card title.
+        subtitle_fn: Optional function(req) → subtitle HTML string.
+        detail_fn:   Optional function(req) → detail/reason HTML string.
+        on_approve:  Callback(req_id) when Approve is clicked.
+        on_reject:   Callback(req_id) when Reject is clicked.
+    """
+    for req in requests:
+        subtitle = subtitle_fn(req) if subtitle_fn else ""
+        detail = detail_fn(req) if detail_fn else ""
+        render_request_card(
+            req,
+            key_prefix=key_prefix,
+            title_field=title_field,
+            subtitle_html=subtitle,
+            detail_html=detail,
+            on_approve=on_approve,
+            on_reject=on_reject,
+        )

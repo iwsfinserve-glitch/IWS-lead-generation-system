@@ -1,13 +1,14 @@
 import streamlit as st
-import asyncio
+import webbrowser
 import calendar
 from datetime import datetime, date, timedelta
+
 from core.auth import require_login, logout
 from core import api_client
 from core.api_client import APIError
 from core.state import state
 from core.styles import inject_global_styles
-from components.layout import render_sidebar, render_pagination
+from components.layout import render_sidebar, render_pagination, render_divider
 from components.cards import render_appointment_cards
 from components.modals import show_appointment_panel
 
@@ -16,11 +17,18 @@ st.set_page_config(page_title="Appointments", page_icon="", layout="wide")
 inject_global_styles(drawer=True, overlay_cards=True)
 
 
+# ---------------------------------------------------------------------------
+# Dialogs
+# ---------------------------------------------------------------------------
+
 @st.dialog("New Appointment", width="medium")
 def create_appointment_dialog(prefill_date=None):
     st.markdown("### Schedule Appointment")
-    lead_id = st.selectbox("Lead", options=list(st.session_state.lead_options.keys()),
-                           format_func=lambda x: st.session_state.lead_options.get(x, str(x)))
+    lead_id = st.selectbox(
+        "Lead",
+        options=list(st.session_state.lead_options.keys()),
+        format_func=lambda x: st.session_state.lead_options.get(x, str(x)),
+    )
     title = st.text_input("Title", placeholder="e.g. Call with client")
     col_d, col_t = st.columns(2)
     with col_d:
@@ -29,7 +37,11 @@ def create_appointment_dialog(prefill_date=None):
         start_time = st.time_input("Start Time", key="new_start")
     end_time = st.time_input("End Time", key="new_end")
 
-    mode = st.selectbox("Mode", ["online", "in_person"], format_func=lambda x: "Online" if x == "online" else "In Person")
+    mode = st.selectbox(
+        "Mode",
+        ["online", "in_person"],
+        format_func=lambda x: "Online" if x == "online" else "In Person",
+    )
     location = st.text_input("Location", placeholder="e.g. Google Meet / Office address")
     note = st.text_area("Note", height=80, placeholder="Agenda or details...")
 
@@ -73,12 +85,12 @@ def day_dialog(day_str):
             time_str = appt["start_time"][11:16]
             mode_color = "blue" if appt.get("mode") == "online" else "#4CAF50"
             mode_label = "Online" if appt.get("mode") == "online" else "In Person"
-            safe_title = bleach.clean(appt['title'])
-            safe_lead = bleach.clean(appt.get('lead_name') or 'N/A')
-            
+            safe_title = bleach.clean(appt["title"])
+            safe_lead = bleach.clean(appt.get("lead_name") or "N/A")
+
             st.markdown(
                 f"""<div class="overlay-trigger" style="border:1px solid #ddd; border-radius:6px; padding:12px; margin-bottom:8px; background:white; cursor:pointer;">
-                    <strong>{time_str}</strong> — {safe_title}<br>
+                    <strong>{time_str}</strong> - {safe_title}<br>
                     <span style="background:{mode_color}; color:white; border-radius:4px;
                           padding:2px 6px; font-size:0.7rem; margin-left:8px;">{mode_label}</span>
                     <span style="color:#777; font-size:0.85rem;">Lead: {safe_lead}</span>
@@ -92,15 +104,25 @@ def day_dialog(day_str):
         st.caption("No appointments on this day.")
 
 
+# ---------------------------------------------------------------------------
+# Auth guard
+# ---------------------------------------------------------------------------
+
 require_login()
 
 TOKEN = state.token
 USER = state.user or {}
 
-# ── Sidebar ──
+# ---------------------------------------------------------------------------
+# Sidebar
+# ---------------------------------------------------------------------------
+
 render_sidebar(key_suffix="appt")
 
-# ── Fetch data ──
+# ---------------------------------------------------------------------------
+# Data fetch
+# ---------------------------------------------------------------------------
+
 try:
     appointments = api_client.get_appointments(TOKEN)
     st.session_state.appointments = appointments
@@ -117,43 +139,117 @@ except APIError:
     lead_options = {}
     st.session_state.lead_options = {}
 
-if "cal_year" not in st.session_state:
-    st.session_state.cal_year = datetime.now().year
-if "cal_month" not in st.session_state:
-    st.session_state.cal_month = datetime.now().month
-if "upcoming_appt_page" not in st.session_state:
-    st.session_state.upcoming_appt_page = 1
-if "previous_appt_page" not in st.session_state:
-    st.session_state.previous_appt_page = 1
+# Check Google connection status (cached by Streamlit's st.cache_data on the backend)
+google_connected: bool = USER.get("google_connected", False)
+if not google_connected:
+    # Re-confirm with a lightweight status endpoint (returns quickly)
+    try:
+        status_resp = api_client.get_google_status(TOKEN)
+        google_connected = status_resp.get("google_connected", False)
+    except APIError:
+        google_connected = False
+
+# Session state defaults
+for key, default in [
+    ("cal_year", datetime.now().year),
+    ("cal_month", datetime.now().month),
+    ("upcoming_appt_page", 1),
+    ("previous_appt_page", 1),
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 PAGE_SIZE = 10
 
-# ── Page Header ──
+# ---------------------------------------------------------------------------
+# Handle OAuth callback query params
+# ---------------------------------------------------------------------------
+
+query_params = st.query_params
+
+if "google_connected" in query_params and query_params["google_connected"] == "1":
+    st.toast("Google Calendar connected! Syncing your appointments in the background...", icon="✅")
+    # Clear the param so it doesn't re-trigger on every rerun
+    st.query_params.clear()
+    # Force a user-state refresh so the button disappears immediately
+    google_connected = True
+
+if "google_error" in query_params and query_params["google_error"] == "1":
+    detail = query_params.get("error_msg", "")
+    err_text = "Google Calendar connection failed. Please try again. Make sure you grant all requested permissions."
+    if detail:
+        err_text += f"\n\n**Error Details:** `{detail}`"
+    st.error(err_text)
+    st.query_params.clear()
+
+# ---------------------------------------------------------------------------
+# Page header + action buttons
+# ---------------------------------------------------------------------------
+
 st.title("Appointments")
-st.markdown('<hr style="height:1px;background:#d4d4d4; margin-bottom: 10px; margin-top: 0px;">', unsafe_allow_html=True)
+render_divider()
 
-# ── View Toggle ──
-view = st.radio("View", ["Calendar View", "List View"], horizontal=True, label_visibility="collapsed")
+view = st.radio(
+    "View",
+    ["Calendar View", "List View"],
+    horizontal=True,
+    label_visibility="collapsed",
+)
 
-# ── New Appointment button ──
-if st.button("＋ New Appointment", type="primary"):
-    create_appointment_dialog()
+# Button row: New Appointment | Sync with Google Calendar
+btn_col1, btn_col2, btn_col3 = st.columns([2, 2, 6])
+
+with btn_col1:
+    if st.button("New Appointment", type="primary", use_container_width=True):
+        create_appointment_dialog()
+
+with btn_col2:
+    if google_connected:
+        # Show a compact "synced" status indicator instead of the connect button
+        st.markdown(
+            """<div style="display:flex; align-items:center; gap:6px; padding:6px 12px;
+                background:#e8f5e9; border:1px solid #a5d6a7; border-radius:8px;
+                font-size:0.85rem; color:#2e7d32; font-weight:500; height:38px;">
+                Google Calendar Synced
+            </div>""",
+            unsafe_allow_html=True,
+        )
+    else:
+        if st.button("Sync with Google Calendar", use_container_width=True):
+            connect_url = api_client.google_connect_url(TOKEN)
+            # Open the OAuth flow in a new browser tab
+            webbrowser.open(connect_url)
+            st.info(
+                "A browser window has opened for Google authorization. "
+                "After granting access, you will be redirected back here automatically.",
+                icon="🔗",
+            )
 
 st.caption(f"{len(appointments)} appointments total")
 
-# ── Auto-open detail dialog if redirected from calendar day view ──
+# ---------------------------------------------------------------------------
+# Auto-open detail dialog if redirected from calendar day view
+# ---------------------------------------------------------------------------
+
 if "pending_appt_id" in st.session_state and st.session_state.pending_appt_id:
     appt_id = st.session_state.pending_appt_id
     st.session_state.pending_appt_id = None
     show_appointment_panel(appt_id)
 
-# =====================================================
+# ---------------------------------------------------------------------------
 # LIST VIEW
-# =====================================================
+# ---------------------------------------------------------------------------
 if view == "List View":
     now_iso = datetime.now().isoformat()
-    upcoming_appts = sorted([a for a in appointments if a["start_time"] >= now_iso], key=lambda a: a["start_time"])
-    previous_appts = sorted([a for a in appointments if a["start_time"] < now_iso], key=lambda a: a["start_time"], reverse=True)
+    upcoming_appts = sorted(
+        [a for a in appointments if a["start_time"] >= now_iso],
+        key=lambda a: a["start_time"],
+    )
+    previous_appts = sorted(
+        [a for a in appointments if a["start_time"] < now_iso],
+        key=lambda a: a["start_time"],
+        reverse=True,
+    )
 
     tab_upcoming, tab_previous = st.tabs([
         f"Upcoming ({len(upcoming_appts)})",
@@ -180,9 +276,9 @@ if view == "List View":
         else:
             st.info("No previous appointments found.")
 
-# =====================================================
+# ---------------------------------------------------------------------------
 # CALENDAR VIEW
-# =====================================================
+# ---------------------------------------------------------------------------
 elif view == "Calendar View":
     year = st.session_state.cal_year
     month = st.session_state.cal_month
@@ -190,7 +286,7 @@ elif view == "Calendar View":
     # Month navigation
     nav_left, nav_center, nav_right = st.columns([1, 3, 1])
     with nav_left:
-        if st.button("◀", use_container_width=True):
+        if st.button("<", use_container_width=True):
             if month == 1:
                 st.session_state.cal_month = 12
                 st.session_state.cal_year = year - 1
@@ -203,7 +299,7 @@ elif view == "Calendar View":
             unsafe_allow_html=True,
         )
     with nav_right:
-        if st.button("▶", use_container_width=True):
+        if st.button(">", use_container_width=True):
             if month == 12:
                 st.session_state.cal_month = 1
                 st.session_state.cal_year = year + 1
@@ -213,7 +309,7 @@ elif view == "Calendar View":
 
     # Build appointment count per day for this month
     month_str = f"{year}-{month:02d}"
-    appt_counts = {}
+    appt_counts: dict[int, int] = {}
     for appt in appointments:
         appt_day = appt["start_time"][:10]
         if appt_day.startswith(month_str):
@@ -244,15 +340,19 @@ elif view == "Calendar View":
                     is_today = (year == today.year and month == today.month and day_num == today.day)
 
                     border = "2px solid blue" if is_today else "1px solid #ddd"
-                    dot = f"<span style='display:inline-block; background:blue; color:white; border-radius:50%; width:18px; height:18px; font-size:0.65rem; line-height:18px; text-align:center;'>{count}</span>" if count > 0 else ""
-
-
+                    dot = (
+                        f"<span style='display:inline-block; background:blue; color:white; "
+                        f"border-radius:50%; width:18px; height:18px; font-size:0.65rem; "
+                        f"line-height:18px; text-align:center;'>{count}</span>"
+                        if count > 0 else ""
+                    )
 
                     html_content = (
                         f"""<div onmouseover="this.style.color = 'red';" class="overlay-trigger" style='border:{border}; border-radius:6px; background:white; """
                         f"padding:8px; text-align:center; min-height:100px; margin-bottom:4px; transition: transform 0.15 ease;'>"
                         f"<span  style='font-weight:600; color:#333;'>{day_num}</span><br>{dot}"
-                        f"</div>" )
+                        f"</div>"
+                    )
 
                     st.markdown(html_content, unsafe_allow_html=True)
 

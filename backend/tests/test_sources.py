@@ -32,17 +32,17 @@ class TestListSources:
 class TestCreateSource:
     async def test_admin_can_create_source(self, client, admin_token):
         resp = await client.post("/api/v1/sources/", json={
-            "name": "MCA ROC Data",
+            "name": "Client Referral",
             "priority": "high",
         }, headers=auth_headers(admin_token))
         assert resp.status_code == 201
         body = resp.json()
-        assert body["name"] == "MCA ROC Data"
+        assert body["name"] == "Client Referral"
         assert "id" in body
 
     async def test_manager_can_create_source(self, client, manager_token):
         resp = await client.post("/api/v1/sources/", json={
-            "name": "Goa RERA",
+            "name": "Wealth Seminar",
             "priority": "medium",
         }, headers=auth_headers(manager_token))
         assert resp.status_code == 201
