@@ -72,6 +72,7 @@ class TestRegister:
         resp = await client.post("/api/v1/auth/register", json={
             "name": "New Sales Rep",
             "email": "newsalesrep@example.com",
+            "phone_number": "1234567890",
             "password": "securepass123",
             "role": "sales_rep",
         }, headers=auth_headers(admin_token))
@@ -84,6 +85,7 @@ class TestRegister:
         resp = await client.post("/api/v1/auth/register", json={
             "name": "Unauthorized",
             "email": "unauth@example.com",
+            "phone_number": "1234567890",
             "password": "pass",
             "role": "sales_rep",
         }, headers=auth_headers(sales_rep_token))
@@ -93,6 +95,7 @@ class TestRegister:
         resp = await client.post("/api/v1/auth/register", json={
             "name": "Unauthorized",
             "email": "unauth2@example.com",
+            "phone_number": "1234567890",
             "password": "pass",
             "role": "sales_rep",
         }, headers=auth_headers(manager_token))
@@ -102,6 +105,7 @@ class TestRegister:
         resp = await client.post("/api/v1/auth/register", json={
             "name": "Duplicate",
             "email": admin_user.email,   # already exists
+            "phone_number": "1234567890",
             "password": "pass123",
             "role": "sales_rep",
         }, headers=auth_headers(admin_token))

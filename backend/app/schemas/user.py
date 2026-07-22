@@ -12,6 +12,7 @@ class UserCreate(BaseModel):
     """Schema for creating a new user (admin-only registration)."""
     name: str = Field(..., min_length=1, max_length=255)
     email: EmailStr
+    phone_number: str = Field(..., min_length=1, max_length=50)
     password: str = Field(..., min_length=6, max_length=128)
     role: UserRole = UserRole.sales_rep
     manager_id: int | None = None
@@ -22,6 +23,7 @@ class UserRead(BaseModel):
     id: int
     name: str
     email: str
+    phone_number: str
     role: UserRole
     manager_id: int | None = None
     google_connected: bool = False
@@ -34,6 +36,7 @@ class UserRead(BaseModel):
             id=user.id,
             name=user.name,
             email=user.email,
+            phone_number=user.phone_number,
             role=user.role,
             manager_id=user.manager_id,
             google_connected=user.google_refresh_token is not None,
@@ -44,6 +47,7 @@ class UserUpdate(BaseModel):
     """Schema for updating an existing user — all fields optional."""
     name: str | None = Field(None, min_length=1, max_length=255)
     email: EmailStr | None = None
+    phone_number: str | None = Field(None, min_length=1, max_length=50)
     password: str | None = Field(None, min_length=6, max_length=128)
     role: UserRole | None = None
     manager_id: int | None = None

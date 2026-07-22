@@ -1,5 +1,6 @@
 import streamlit as st
 import asyncio
+import time
 from datetime import datetime
 from core.auth import require_login, logout
 from core import api_client
@@ -65,9 +66,16 @@ def get_leads_data():
 @st.fragment
 def render_sales_rep_dashboard():
 
+    # Silent background refresh every 30 seconds (no full page reload)
+    if "dash_last_refresh" not in st.session_state:
+        st.session_state.dash_last_refresh = time.time()
+    if time.time() - st.session_state.dash_last_refresh > 30:
+        api_client.get_leads.clear()
+        st.session_state.dash_last_refresh = time.time()
+
     all_leads, page_leads = get_leads_data()
     total = len(all_leads)
-    new = len([l for l in all_leads if l["status"] == "new"])
+    unassigned = len([l for l in all_leads if l["status"] == "unassigned"])
     potent = len([l for l in all_leads if l["status"] == "potential"])
     converted = len([l for l in all_leads if l["status"] == "converted_to_investor"])
 
@@ -75,7 +83,7 @@ def render_sales_rep_dashboard():
         f"""
 <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:16px; margin-bottom:20px;">
 {metric_card("Total Leads", total)}
-{metric_card("New Leads", new)}
+{metric_card("Unassigned Leads", unassigned)}
 {metric_card("Potential Leads", potent)}
 {metric_card("Converted", converted)}
 </div>
@@ -185,7 +193,7 @@ def render_filters_and_leads(all_leads, show_rep_filter=True):
     total_pages = (len(filtered_leads) // PAGE_SIZE) + (1 if len(filtered_leads) % PAGE_SIZE > 0 else 0)
 
     st.caption(f"Showing {len(paginated_filtered_leads)} of {len(filtered_leads)} leads (Page {st.session_state.lead_page} of {total_pages})")
-    if st.button("Create New Lead", type="primary"):
+    if st.button("+ Create New Lead", type="primary"):
         create_lead_dialog()
 
     render_lead_cards(paginated_filtered_leads, key_prefix="card", on_click=navigate_to_lead)
@@ -219,12 +227,12 @@ def render_manager_dashboard():
             """, unsafe_allow_html=True
         )
         st.subheader(f"Sales Representatives ({len(my_reps)})")
-        render_user_cards(my_reps, key_prefix="mgr_user", is_admin=False)
+        render_user_cards(my_reps, key_prefix="mgr_user")
     except APIError as e:
         st.error(f"Failed to fetch users: {e}")
 
 def render_admin_dashboard():
-    if st.button("Create New User", type="primary"):
+    if st.button("+ Create New User", type="primary"):
         manage_user_dialog_wrapper()
     try:
         users = api_client.get_users(TOKEN)
@@ -243,9 +251,6 @@ def render_admin_dashboard():
         render_user_cards(
             users,
             key_prefix="adm_user",
-            is_admin=True,
-            on_edit=manage_user_dialog_wrapper,
-            on_delete=delete_user_handler,
         )
     except APIError as e:
         st.error(f"Failed to fetch users: {e}")

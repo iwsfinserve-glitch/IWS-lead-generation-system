@@ -102,6 +102,7 @@ async def admin_user(db_session):
     user = User(
         name="Test Admin",
         email="testadmin@example.com",
+        phone_number="9999900001",
         hashed_password=hash_password("admin123"),
         role=UserRole.admin,
     )
@@ -116,6 +117,7 @@ async def manager_user(db_session):
     user = User(
         name="Test Manager",
         email="testmanager@example.com",
+        phone_number="9999900002",
         hashed_password=hash_password("manager123"),
         role=UserRole.manager,
     )
@@ -130,6 +132,7 @@ async def sales_rep_user(db_session):
     user = User(
         name="Test Rep",
         email="testrep@example.com",
+        phone_number="9999900003",
         hashed_password=hash_password("rep123"),
         role=UserRole.sales_rep,
     )
@@ -155,7 +158,7 @@ async def sample_lead(db_session, lead_source, admin_user):
         profession="Investor",
         email="lead@example.com",
         phone_number="9876543210",
-        status=LeadStatus.new,
+        status=LeadStatus.unassigned,
         source_id=lead_source.id,
         assigned_rep_id=admin_user.id,
     )

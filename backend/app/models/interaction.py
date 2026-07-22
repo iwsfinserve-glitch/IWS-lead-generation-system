@@ -15,7 +15,7 @@ Task         — An internal work item assigned to a user, optionally
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
-    Integer, String, Enum, Date, DateTime, ForeignKey, Text, JSON,
+    Integer, String, Boolean, Enum, Date, DateTime, ForeignKey, Text, JSON, Index,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -37,7 +37,7 @@ class LeadTimeline(Base):
     structured data that the AI reporting engine reads for context.
 
     Example event_metadata:
-        {"old_status": "new", "new_status": "in_progress", "note": "First call made"}
+        {"old_status": "unassigned", "new_status": "in_progress", "note": "First call made"}
         {"appointment_title": "Demo call", "mode": "online"}
     """
 
@@ -48,8 +48,9 @@ class LeadTimeline(Base):
     lead_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True,
     )
-    user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=False,
+    user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True,
+        comment="NULL for system-generated entries (e.g. SEO web form intake)",
     )
 
     event_type: Mapped[str] = mapped_column(
@@ -69,7 +70,7 @@ class LeadTimeline(Base):
 
     # ── Relationships ──────────────────────────────────────────────────
     lead: Mapped["Lead"] = relationship("Lead", back_populates="timeline", lazy="selectin")      # noqa: F821
-    user: Mapped["User"] = relationship("User", back_populates="timeline_entries", lazy="selectin")  # noqa: F821
+    user: Mapped["User | None"] = relationship("User", back_populates="timeline_entries", lazy="selectin")  # noqa: F821
 
     def __repr__(self) -> str:
         return f"<LeadTimeline id={self.id} lead_id={self.lead_id} type={self.event_type!r}>"
@@ -112,12 +113,25 @@ class Appointment(Base):
         DateTime(timezone=True), nullable=True,
     )
 
+    # ── Status lifecycle ───────────────────────────────────────────────
+    status: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="upcoming",
+        comment="upcoming | pending | completed",
+    )
+    # Idempotency flag — prevents re-notifying the manager on every reconcile run
+    manager_alerted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false",
+    )
+
+    # Composite index used by the hourly reconcile query
+    __table_args__ = (Index("ix_appointments_status_end_time", "status", "end_time"),)
+
     # ── Relationships ──────────────────────────────────────────────────
     lead: Mapped["Lead"] = relationship("Lead", back_populates="appointments", lazy="selectin")    # noqa: F821
     user: Mapped["User"] = relationship("User", back_populates="appointments", lazy="selectin")    # noqa: F821
 
     def __repr__(self) -> str:
-        return f"<Appointment id={self.id} title={self.title!r}>"
+        return f"<Appointment id={self.id} title={self.title!r} status={self.status}>"
 
 
 

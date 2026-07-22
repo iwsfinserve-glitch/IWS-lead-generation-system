@@ -85,6 +85,7 @@ async def register_user(
     user = User(
         name=payload.name,
         email=payload.email,
+        phone_number=payload.phone_number,
         hashed_password=hash_password(payload.password),
         role=payload.role,
         manager_id=payload.manager_id,

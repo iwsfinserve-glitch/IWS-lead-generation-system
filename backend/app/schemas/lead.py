@@ -34,12 +34,27 @@ class LeadSourceUpdate(BaseModel):
 
 class LeadCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    profession: str | None = None
-    email: str | None = None
-    phone_number: str | None = None
+    profession: str = Field(..., min_length=1, max_length=255)
+    email: str = Field(..., min_length=1, max_length=255)
+    phone_number: str = Field(..., min_length=1, max_length=50)
     address: str | None = None
     source_id: int | None = None
     assigned_rep_id: int | None = None
+    note: str | None = None
+
+
+class WebLeadCreate(BaseModel):
+    """Schema for the public SEO / website contact form intake endpoint.
+
+    Does not accept source_id or assigned_rep_id — those are set server-side.
+    `message` maps to the initial note/inquiry from the web form.
+    """
+    name: str = Field(..., min_length=1, max_length=255)
+    email: str = Field(..., min_length=1, max_length=255)
+    phone_number: str = Field(..., min_length=1, max_length=50)
+    profession: str = Field(..., min_length=1, max_length=255)
+    address: str | None = None
+    message: str | None = None   # The inquiry/message field from the contact form
 
 
 class LeadRead(BaseModel):
@@ -55,12 +70,17 @@ class LeadRead(BaseModel):
     assigned_rep_id: int | None
     created_at: datetime
     source_name: str | None = None
+    source_priority: str | None = None
     assigned_rep_name: str | None = None
 
     # Denormalized AI score cache — None until first AI analysis run
     ai_score: float | None = None
     ai_score_label: str | None = None          # "hot" | "warm" | "cold"
     ai_score_updated_at: datetime | None = None
+
+    # Denormalized client classification — None until first classification run
+    client_classification: str | None = None   # "hni" | "professional" | "retail"
+    client_classification_updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -79,11 +99,15 @@ class LeadRead(BaseModel):
             assigned_rep_id=lead.assigned_rep_id,
             created_at=lead.created_at,
             source_name=lead.source.name if lead.source else None,
+            source_priority=lead.source.priority if lead.source else "medium",
             assigned_rep_name=lead.assigned_rep.name if lead.assigned_rep else None,
             # AI cache columns — safe getattr in case migration hasn't run yet
             ai_score=getattr(lead, "ai_score", None),
             ai_score_label=getattr(lead, "ai_score_label", None),
             ai_score_updated_at=getattr(lead, "ai_score_updated_at", None),
+            # Classification cache — safe getattr for same reason
+            client_classification=getattr(lead, "client_classification", None),
+            client_classification_updated_at=getattr(lead, "client_classification_updated_at", None),
         )
 
 
@@ -110,7 +134,7 @@ class LeadTimelineCreate(BaseModel):
 class LeadTimelineRead(BaseModel):
     id: int
     lead_id: int
-    user_id: int
+    user_id: int | None       # None for system-generated entries (e.g. SEO web form)
     event_type: str
     event_metadata: dict
     created_at: datetime

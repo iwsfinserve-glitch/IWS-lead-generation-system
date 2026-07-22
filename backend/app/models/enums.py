@@ -18,7 +18,7 @@ class UserRole(str, enum.Enum):
 
 class LeadStatus(str, enum.Enum):
     """Pipeline stages for a lead."""
-    new = "new"
+    unassigned = "unassigned"
     in_progress = "in_progress"
     potential = "potential"
     non_potential = "non_potential"

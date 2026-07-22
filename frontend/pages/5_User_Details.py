@@ -1,3 +1,4 @@
+import html
 import streamlit as st
 from datetime import datetime
 from core.auth import require_login
@@ -6,7 +7,7 @@ from core.state import state
 from core.api_client import APIError
 from core.styles import inject_global_styles
 from components.cards import render_lead_cards, render_task_cards, render_appointment_cards
-from components.modals import show_task_panel, show_appointment_panel, metric_card
+from components.modals import show_task_panel, show_appointment_panel, metric_card, manage_user_dialog
 
 st.set_page_config(page_title="User Details", page_icon="", layout="wide")
 
@@ -47,11 +48,80 @@ except APIError as e:
     st.error(f"Failed to fetch data: {e}")
     st.stop()
 
-if st.button("← Back to Dashboard"):
+if st.button("← Back to Dashboard", type="primary"):
     st.switch_page("pages/1_Dashboard.py")
 
-st.title(selected_user['name'])
-st.caption(f"{selected_user['role'].replace('_', ' ').title()} — {selected_user['email']}")
+st.title("User Profile")
+
+safe_name = html.escape(str(selected_user.get('name') or 'N/A'))
+safe_role = html.escape(str((selected_user.get('role') or 'sales_rep').replace('_', ' ').title()))
+safe_email = html.escape(str(selected_user.get('email') or 'N/A'))
+safe_phone = html.escape(str(selected_user.get('phone_number') or 'N/A'))
+
+# We can lookup manager name if available. But typically manager_id is returned.
+manager_id = selected_user.get("manager_id")
+manager_name = "None"
+if manager_id:
+    manager_match = next((u for u in users if u["id"] == manager_id), None)
+    if manager_match:
+        manager_name = manager_match.get("name", f"ID: {manager_id}")
+safe_manager_name = html.escape(str(manager_name))
+        
+st.markdown(
+    f"""
+    <div style="background:white; border:1px solid #ddd; border-radius:8px; padding:20px; margin-bottom:20px;">
+        <h2 style="margin-top:0; color:#333; margin-bottom:8px; display:inline-block;">{safe_name}</h2>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+            <div>
+                <span style="color:#666; font-size:0.85rem; font-weight:600; text-transform:uppercase;">Email</span><br>
+                <span style="color:#333; font-size:1.05rem;">{safe_email}</span>
+            </div>
+            <div>
+                <span style="color:#666; font-size:0.85rem; font-weight:600; text-transform:uppercase;">Phone Number</span><br>
+                <span style="color:#333; font-size:1.05rem;">{safe_phone}</span>
+            </div>
+            <div>
+                <span style="color:#666; font-size:0.85rem; font-weight:600; text-transform:uppercase;">Role</span><br>
+                <span style="color:#333; font-size:1.05rem;">{safe_role}</span>
+            </div>
+            <div>
+                <span style="color:#666; font-size:0.85rem; font-weight:600; text-transform:uppercase;">Reports To</span><br>
+                <span style="color:#333; font-size:1.05rem;">{safe_manager_name}</span>
+            </div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+if state.user and state.user.get("role") == "admin":
+    empty_col, edit_col = st.columns([2,2])
+    with edit_col:
+        col_edit, col_del = st.columns(2)
+        with col_edit:
+            if st.button("Edit Details", use_container_width=True, key="admin_edit_user"):
+                manage_user_dialog(state.token, selected_user)
+        with col_del:
+            if st.button("Delete User", type="primary", use_container_width=True, key="admin_del_user"):
+                st.session_state[f"confirm_del_user_{selected_user_id}"] = True
+                    
+        if st.session_state.get(f"confirm_del_user_{selected_user_id}", False):
+            st.warning(f"Are you sure you want to permanently delete user '{safe_name}'? This cannot be undone.")
+            col_yes, col_no = st.columns(2)
+            with col_yes:
+                if st.button("Yes, Delete", type="primary", use_container_width=True, key="admin_del_user_yes"):
+                    try:
+                        api_client.delete_user(state.token, selected_user_id)
+                        st.toast("User deleted successfully.")
+                        st.session_state[f"confirm_del_user_{selected_user_id}"] = False
+                        st.switch_page("pages/1_Dashboard.py")
+                    except Exception as e:
+                        st.error(f"Failed to delete: {e}")
+            with col_no:
+                if st.button("Cancel", use_container_width=True, key="admin_del_user_no"):
+                    st.session_state[f"confirm_del_user_{selected_user_id}"] = False
+                    st.rerun()
+
 
 active_leads = [l for l in assigned_leads if l["status"] != "converted_to_investor"]
 converted_leads = [l for l in assigned_leads if l["status"] == "converted_to_investor"]

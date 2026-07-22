@@ -5,8 +5,8 @@ LeadSource — categorises how a lead was acquired (e.g. Walk-in, SEO).
 Lead       — an individual prospect tracked through the sales pipeline.
 
 Status lifecycle:
-    new → in_progress → potential → converted_to_investor → existing_investor (monthly rollover)
-                      ↘ non_potential
+    unassigned → in_progress → potential → converted_to_investor → existing_investor (monthly rollover)
+                             ↘ non_potential
 """
 
 from datetime import date, datetime, timezone
@@ -68,7 +68,7 @@ class Lead(Base):
     status: Mapped[LeadStatus] = mapped_column(
         Enum(LeadStatus, name="lead_status", create_constraint=True),
         nullable=False,
-        default=LeadStatus.new,
+        default=LeadStatus.unassigned,
     )
     last_contact: Mapped[date | None] = mapped_column(Date, nullable=True)
 
@@ -94,11 +94,11 @@ class Lead(Base):
     )
     timeline: Mapped[list["LeadTimeline"]] = relationship(            # noqa: F821
         "LeadTimeline", back_populates="lead",
-        cascade="all, delete-orphan", lazy="selectin",
+        cascade="all, delete-orphan", lazy="select",
     )
     appointments: Mapped[list["Appointment"]] = relationship(         # noqa: F821
         "Appointment", back_populates="lead",
-        cascade="all, delete-orphan", lazy="selectin",
+        cascade="all, delete-orphan", lazy="select",
     )
 
     # ── Denormalized AI score cache (updated by POST /leads/{id}/ai/score) ──
@@ -112,9 +112,20 @@ class Lead(Base):
         DateTime(timezone=True), nullable=True,
     )
 
+    # ── Denormalized client-classification cache (updated by the classification AI feature) ──
+    # Stored directly on Lead so list/card views can display the badge without
+    # an extra JOIN against lead_ai_insights on every page load.
+    client_classification: Mapped[str | None] = mapped_column(
+        String(20), nullable=True,
+        comment="'hni' | 'professional' | 'retail' | NULL (unclassified)",
+    )
+    client_classification_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
     ai_insights: Mapped[list["LeadAIInsight"]] = relationship(         # noqa: F821
         "LeadAIInsight", back_populates="lead",
-        cascade="all, delete-orphan", lazy="selectin",
+        cascade="all, delete-orphan", lazy="select",
     )
 
     def __repr__(self) -> str:

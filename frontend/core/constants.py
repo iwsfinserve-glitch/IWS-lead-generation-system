@@ -8,7 +8,7 @@ from there by cards.py, pages, etc.
 
 # Human-readable display names keyed by API status value.
 STATUS_DISPLAY = {
-    "new": "New",
+    "unassigned": "Unassigned",
     "in_progress": "In Progress",
     "potential": "Potential",
     "non_potential": "Non-Potential",
@@ -18,7 +18,7 @@ STATUS_DISPLAY = {
 
 # Ordered list of API status values (for dropdowns).
 STATUS_OPTIONS_API = [
-    "new", "in_progress", "potential", "non_potential",
+    "unassigned", "in_progress", "potential", "non_potential",
     "converted_to_investor", "existing_investor",
 ]
 
@@ -27,7 +27,7 @@ STATUS_OPTIONS_DISPLAY = [STATUS_DISPLAY[s] for s in STATUS_OPTIONS_API]
 
 # Card badge config: abbreviation + background color per status.
 STATUS_CONFIG = {
-    "new":           {"abbr": "N",  "bg": "blue"},
+    "unassigned":    {"abbr": "U",  "bg": "#607D8B"},   # blue-grey — awaiting assignment
     "in_progress":   {"abbr": "IP", "bg": "#FFC107"},
     "potential":     {"abbr": "P",  "bg": "#4CAF50"},
     "non_potential": {"abbr": "NP", "bg": "Red"},
@@ -36,4 +36,4 @@ STATUS_CONFIG = {
 }
 
 # Statuses considered "active" (i.e. not converted/investor).
-ACTIVE_STATUSES = {"new", "in_progress", "potential", "non_potential"}
+ACTIVE_STATUSES = {"unassigned", "in_progress", "potential", "non_potential"}

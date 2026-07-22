@@ -81,19 +81,28 @@ def day_dialog(day_str):
 
     if day_appts:
         import bleach
+        _STATUS_BADGE = {
+            "upcoming":  ("#2196F3", "Upcoming"),
+            "pending":   ("#FF9800", "Pending"),
+            "completed": ("#4CAF50", "Completed"),
+        }
         for appt in day_appts:
             time_str = appt["start_time"][11:16]
             mode_color = "blue" if appt.get("mode") == "online" else "#4CAF50"
             mode_label = "Online" if appt.get("mode") == "online" else "In Person"
             safe_title = bleach.clean(appt["title"])
             safe_lead = bleach.clean(appt.get("lead_name") or "N/A")
+            current_status = appt.get("status", "upcoming")
+            sbg, slabel = _STATUS_BADGE.get(current_status, ("#888", current_status.title()))
 
             st.markdown(
                 f"""<div class="overlay-trigger" style="border:1px solid #ddd; border-radius:6px; padding:12px; margin-bottom:8px; background:white; cursor:pointer;">
                     <strong>{time_str}</strong> - {safe_title}<br>
                     <span style="background:{mode_color}; color:white; border-radius:4px;
-                          padding:2px 6px; font-size:0.7rem; margin-left:8px;">{mode_label}</span>
-                    <span style="color:#777; font-size:0.85rem;">Lead: {safe_lead}</span>
+                          padding:2px 6px; font-size:0.7rem; margin-left:0px;">{mode_label}</span>
+                    &nbsp;<span style="background:{sbg}; color:white; border-radius:4px;
+                          padding:2px 6px; font-size:0.7rem;">{slabel}</span>
+                    &nbsp;<span style="color:#777; font-size:0.85rem;">Lead: {safe_lead}</span>
                 </div>""",
                 unsafe_allow_html=True,
             )
@@ -251,10 +260,21 @@ if view == "List View":
         reverse=True,
     )
 
-    tab_upcoming, tab_previous = st.tabs([
-        f"Upcoming ({len(upcoming_appts)})",
-        f"Previous ({len(previous_appts)})",
-    ])
+    USER_ROLE = USER.get("role", "sales_rep")
+    IS_MANAGER_OR_ADMIN = USER_ROLE in ("manager", "admin")
+
+    if IS_MANAGER_OR_ADMIN:
+        tab_upcoming, tab_previous, tab_pending = st.tabs([
+            f"Upcoming ({len(upcoming_appts)})",
+            f"Previous ({len(previous_appts)})",
+            "Pending Follow-ups",
+        ])
+    else:
+        tab_upcoming, tab_previous = st.tabs([
+            f"Upcoming ({len(upcoming_appts)})",
+            f"Previous ({len(previous_appts)})",
+        ])
+        tab_pending = None
 
     with tab_upcoming:
         skip = (st.session_state.upcoming_appt_page - 1) * PAGE_SIZE
@@ -275,6 +295,19 @@ if view == "List View":
             render_pagination(len(previous_appts), "previous_appt_page", page_size=PAGE_SIZE)
         else:
             st.info("No previous appointments found.")
+
+    if tab_pending is not None:
+        with tab_pending:
+            st.caption("Appointments across your team that are overdue and not yet marked complete.")
+            try:
+                pending_appts = api_client.get_appointments(TOKEN, status="pending")
+            except APIError as e:
+                st.error(f"Failed to load pending appointments: {e}")
+                pending_appts = []
+            if pending_appts:
+                render_appointment_cards(pending_appts, key_prefix="pending_appt_card", on_click=show_appointment_panel)
+            else:
+                st.success("No pending appointments. Your team is all caught up!")
 
 # ---------------------------------------------------------------------------
 # CALENDAR VIEW

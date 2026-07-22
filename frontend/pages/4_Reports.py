@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import base64
+import html
+import io
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import date, timedelta
@@ -202,7 +204,8 @@ def render_team_metrics(data: dict):
 
 def show_narrative(narrative: str):
     st.markdown('<div class="section-title">AI Analysis Narrative</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="narrative-box">{narrative}</div>', unsafe_allow_html=True)
+    safe_narrative = html.escape(str(narrative or "")).replace("\n", "<br>")
+    st.markdown(f'<div class="narrative-box">{safe_narrative}</div>', unsafe_allow_html=True)
 
 
 # ── Fetch common data ─────────────────────────────────────────────────────────

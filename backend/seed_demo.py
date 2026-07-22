@@ -55,23 +55,23 @@ async def seed():
 
         # 1. USERS  (1 admin, 1 manager, 3 sales reps)
         admin = User(
-            name="Samyak Jain", email="admin@example.com",
+            name="Samyak Jain", email="admin@example.com", phone_number="+91 98200 11223",
             hashed_password=hash_password("admin123"), role=UserRole.admin,
         )
         manager = User(
-            name="Priya Naik", email="priya@iwsfinserve.com",
+            name="Priya Naik", email="priya@iwsfinserve.com", phone_number="+91 98200 44556",
             hashed_password=hash_password("manager123"), role=UserRole.manager,
         )
         rep_rahul = User(
-            name="Rahul Desai", email="rahul@iwsfinserve.com",
+            name="Rahul Desai", email="rahul@iwsfinserve.com", phone_number="+91 98200 77889",
             hashed_password=hash_password("rahul123"), role=UserRole.sales_rep,
         )
         rep_sneha = User(
-            name="Sneha Kamat", email="sneha@iwsfinserve.com",
+            name="Sneha Kamat", email="sneha@iwsfinserve.com", phone_number="+91 98200 99001",
             hashed_password=hash_password("sneha123"), role=UserRole.sales_rep,
         )
         rep_vikram = User(
-            name="Vikram Prabhu", email="vikram@iwsfinserve.com",
+            name="Vikram Prabhu", email="vikram@iwsfinserve.com", phone_number="+91 98200 33445",
             hashed_password=hash_password("vikram123"), role=UserRole.sales_rep,
         )
 
@@ -106,12 +106,12 @@ async def seed():
 
         # 3. LEADS  (12 leads across all pipeline stages)
         leads = [
-            # ── NEW leads ──
+            # ── UNASSIGNED leads ──
             Lead(
                 name="Anil Shetty", profession="Business Owner",
                 email="anil.shetty@gmail.com", phone_number="9823456701",
                 address="Alto Porvorim, Goa",
-                status=LeadStatus.new, source_id=src_client_ref.id,
+                status=LeadStatus.unassigned, source_id=src_client_ref.id,
                 assigned_rep_id=rep_rahul.id, last_contact=date.today(),
                 ai_score=85.0, ai_score_label="hot", ai_score_updated_at=_ts(days_ago=1),
             ),
@@ -119,13 +119,13 @@ async def seed():
                 name="Kavita Pai", profession="Architect",
                 email="kavita.pai@outlook.com", phone_number="9823456702",
                 address="Panaji, Goa",
-                status=LeadStatus.new, source_id=src_seminar.id,
+                status=LeadStatus.unassigned, source_id=src_seminar.id,
                 assigned_rep_id=rep_sneha.id,
             ),
             Lead(
                 name="Deepak Naik", profession="IT Consultant",
                 email="deepak.n@techcorp.in", phone_number="9823456703",
-                status=LeadStatus.new, source_id=src_web.id,
+                status=LeadStatus.unassigned, source_id=src_web.id,
                 assigned_rep_id=rep_vikram.id,
                 ai_score=58.0, ai_score_label="warm", ai_score_updated_at=_ts(days_ago=3),
             ),

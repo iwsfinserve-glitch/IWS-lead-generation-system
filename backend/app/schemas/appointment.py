@@ -3,6 +3,7 @@ Pydantic schemas for Appointment operations.
 """
 
 from datetime import datetime
+from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import AppointmentMode
@@ -36,6 +37,8 @@ class AppointmentRead(BaseModel):
     end_time: datetime
     google_event_id: str | None
     last_synced_at: datetime | None
+    status: str
+    manager_alerted: bool
     lead_name: str | None = None
     user_name: str | None = None
 
@@ -55,6 +58,8 @@ class AppointmentRead(BaseModel):
             end_time=appt.end_time,
             google_event_id=appt.google_event_id,
             last_synced_at=appt.last_synced_at,
+            status=appt.status,
+            manager_alerted=appt.manager_alerted,
             lead_name=appt.lead.name if appt.lead else None,
             user_name=appt.user.name if appt.user else None,
         )
@@ -67,3 +72,6 @@ class AppointmentUpdate(BaseModel):
     location: str | None = None
     start_time: datetime | None = None
     end_time: datetime | None = None
+    # Schema-layer guard: clients can only transition to "completed";
+    # pending/upcoming are set automatically by the reconcile job.
+    status: Literal["completed"] | None = None

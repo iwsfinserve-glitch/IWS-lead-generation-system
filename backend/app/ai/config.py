@@ -28,6 +28,14 @@ class AISettings(BaseSettings):
     # Minimum dated interactions required before ContactTimingFeature calls Gemini.
     AI_MIN_INTERACTIONS: int = 3
 
+    # Client classification thresholds — both must be met before calling Gemini.
+    # AI_MIN_CLASSIFICATION_NOTES: minimum number of timeline events that contain
+    #   non-empty note text (e.g. event_type='note' with a non-blank note field).
+    # AI_MIN_CLASSIFICATION_NOTES_LEN: minimum combined character count of all
+    #   note text — guards against short/useless notes inflating the count.
+    AI_MIN_CLASSIFICATION_NOTES: int = 2
+    AI_MIN_CLASSIFICATION_NOTES_LEN: int = 50
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

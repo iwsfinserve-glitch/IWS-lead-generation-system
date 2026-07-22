@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
 
+    # ── SEO Public Intake API ──────────────────────────────────────────
+    # Required: set SEO_WEB_API_KEY in your .env (or environment).
+    # No default is intentional — the app refuses to start without it.
+    # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+    SEO_WEB_API_KEY: str
+
     @field_validator("SECRET_KEY", mode="before")
     @classmethod
     def validate_secret_key(cls, v: str) -> str:

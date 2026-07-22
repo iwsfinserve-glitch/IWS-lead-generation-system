@@ -5,14 +5,14 @@ Navigated to when a lead card is clicked anywhere in the app.
 The calling page must set st.session_state.selected_lead_id before
 calling st.switch_page("pages/7_Lead_Details.py").
 """
-
+import html
 import streamlit as st
 import time
 from datetime import datetime, date
 from core.auth import require_login
 from core import api_client
 from core.state import state
-from core.api_client import APIError
+from core.api_client import APIError, APIConflictError
 from core.styles import inject_global_styles
 from components.layout import render_sidebar
 from components.modals import (
@@ -87,7 +87,7 @@ def render_ai_insights_section(lead_id: int, lead: dict, token: str):
                 padding: 20px; text-align: center; margin-bottom: 14px;
             ">
                 <div style="font-size: 1.15rem; font-weight: 700; color: #0366d6; margin-bottom: 6px;">
-                    ⚡ AI is updating insights in background...
+                    AI is updating insights in background...
                 </div>
                 <div style="font-size: 0.88rem; color: #555;">
                     Analyzing recent interactions and recalculating score & best contact timing (~3s)...
@@ -124,27 +124,30 @@ def render_ai_insights_section(lead_id: int, lead: dict, token: str):
 
         key_signals_html = (
             f'<div style="margin-top:10px;"><strong>Key Signals:</strong> <span style="color:#444;">'
-            + ", ".join(score_data["key_signals"]) + "</span></div>"
+            + ", ".join(html.escape(str(s)) for s in score_data["key_signals"]) + "</span></div>"
         ) if score_data and score_data.get("key_signals") else ""
 
         action_html = (
             f'<div style="margin-top:10px;padding:10px 14px;background:#f0f7ff;border-radius:6px;'
             f'border-left:3px solid #0366d6;font-size:0.88rem;">'
-            f'<strong>Suggested Action:</strong> {score_data["suggested_next_action"]}</div>'
+            f'<strong>Suggested Action:</strong> {html.escape(str(score_data["suggested_next_action"]))}</div>'
         ) if score_data and score_data.get("suggested_next_action") else ""
 
         reasoning_html = (
-            f'<p style="margin:8px 0;font-size:0.92rem;color:#444;"><em>"{score_data["reasoning"]}"</em></p>'
+            f'<p style="margin:8px 0;font-size:0.92rem;color:#444;"><em>"{html.escape(str(score_data["reasoning"]))}"</em></p>'
         ) if score_data and score_data.get("reasoning") else ""
+
+        safe_label = html.escape(str(label.upper()))
+        safe_score_disp = html.escape(str(score_display))
 
         st.markdown(
             f"""
             <div style="background:rgba(0,0,0,0.02);border:1px solid rgba(0,0,0,0.08);
                 border-left:4px solid {l_color};border-radius:10px;padding:16px 18px;margin-bottom:14px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                    <span style="font-weight:700;font-size:1.1rem;color:#222;">{label.upper()} LEAD</span>
+                    <span style="font-weight:700;font-size:1.1rem;color:#222;">{safe_label} LEAD</span>
                     <span style="background:{l_color};color:white;font-weight:700;font-size:0.8rem;
-                        padding:4px 12px;border-radius:12px;">{score_display}</span>
+                        padding:4px 12px;border-radius:12px;">{safe_score_disp}</span>
                 </div>
                 {reasoning_html}
                 {key_signals_html}
@@ -157,9 +160,10 @@ def render_ai_insights_section(lead_id: int, lead: dict, token: str):
         st.caption("No AI Lead Score generated yet. Add a note or update status to generate insights automatically.")
 
     if timing_data and timing_data.get("has_sufficient_data"):
-        days_str   = ", ".join(timing_data.get("suggested_days") or []) or "N/A"
-        window_str = timing_data.get("suggested_window") or "Flexible"
-        conf       = (timing_data.get("confidence") or "medium").upper()
+        days_str   = ", ".join(html.escape(str(d)) for d in (timing_data.get("suggested_days") or [])) or "N/A"
+        window_str = html.escape(str(timing_data.get("suggested_window") or "Flexible"))
+        conf       = html.escape(str((timing_data.get("confidence") or "medium").upper()))
+        safe_timing_reasoning = html.escape(str(timing_data.get("reasoning") or ""))
         st.markdown(
             f"""
             <div style="background:#fafafa;border:1px solid rgba(0,0,0,0.08);
@@ -171,7 +175,7 @@ def render_ai_insights_section(lead_id: int, lead: dict, token: str):
                 <p style="margin:4px 0;font-size:0.9rem;color:#333;">
                     <strong>Days:</strong> {days_str} &nbsp;|&nbsp; <strong>Window:</strong> {window_str}
                 </p>
-                <p style="margin:4px 0 0 0;font-size:0.82rem;color:#666;"><em>{timing_data.get("reasoning", "")}</em></p>
+                <p style="margin:4px 0 0 0;font-size:0.82rem;color:#666;"><em>{safe_timing_reasoning}</em></p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -189,11 +193,15 @@ with back_col:
         origin = st.session_state.get("lead_details_origin", "pages/6_All_Leads.py")
         st.switch_page(origin)
 
+safe_lead_name = html.escape(str(lead.get('name') or ''))
+safe_lead_prof = html.escape(str(lead.get('profession') or ''))
+safe_status_label = html.escape(str(status_label.upper()))
+
 st.markdown(
     f"""
     <div style="display:flex; align-items:baseline; gap:14px; margin-top:4px; margin-bottom:4px;">
-        <h1 style="margin:0; font-weight:800; font-size:2.2rem; color:#111;">{lead['name']}</h1>
-        <span style="font-size:1.1rem; font-weight:400; color:#666;">{lead.get('profession') or ''}</span>
+        <h1 style="margin:0; font-weight:800; font-size:2.2rem; color:#111;">{safe_lead_name}</h1>
+        <span style="font-size:1.1rem; font-weight:400; color:#666;">{safe_lead_prof}</span>
         <span style="
             background:{status_color}; color:white;
             border-radius:6px; padding:4px 12px;
@@ -278,6 +286,35 @@ st.markdown(
 """,
         unsafe_allow_html=True,
     )
+if USER_ROLE == "admin":
+    empty_col, edit_col = st.columns([2,2])
+    with edit_col:
+        col_edit, col_del = st.columns(2)
+        with col_edit:
+            if st.button("Edit", use_container_width=True, key="admin_edit_lead"):
+                from components.modals import edit_lead_dialog
+                edit_lead_dialog(lead)
+        with col_del:
+            if st.button("Delete Lead", type="primary", use_container_width=True, key="admin_del_lead"):
+                st.session_state[f"confirm_del_{lead_id}"] = True
+        
+        if st.session_state.get(f"confirm_del_{lead_id}", False):
+            st.warning("Are you sure you want to permanently delete this lead? This cannot be undone.")
+            col_yes, col_no = st.columns(2)
+            with col_yes:
+                if st.button("Yes, Delete", type="primary", use_container_width=True, key="admin_del_lead_yes"):
+                    try:
+                        api_client.delete_lead(TOKEN, lead_id)
+                        st.toast("Lead deleted successfully.")
+                        st.session_state[f"confirm_del_{lead_id}"] = False
+                        st.switch_page("pages/6_All_Leads.py")
+                    except Exception as e:
+                        st.error(f"Failed to delete: {e}")
+            with col_no:
+                if st.button("Cancel", use_container_width=True, key="admin_del_lead_no"):
+                    st.session_state[f"confirm_del_{lead_id}"] = False
+            st.rerun()        
+
 
 # ─────────────────────────────────────────────────────────────────────
 # TWO-COLUMN LAYOUT
@@ -380,6 +417,49 @@ with left_col:
             except APIError as e:
                 st.error(f"Could not load reps: {e}")
 
+
+    else:
+        st.markdown("### Actions")
+        if lead.get("status") in ("unassigned", "new") or lead.get("assigned_rep_id") is None:
+            with st.container(border=True):
+                st.markdown(
+                    """
+                    <div style="text-align: center; padding: 10px 0;">
+                        <h4 style="margin: 0; color: #E65100;">⚡ Unassigned Lead</h4>
+                        <p style="font-size: 0.88rem; color: #666; margin: 8px 0 14px 0;">
+                            This lead is waiting for a representative. Claim it now to assign it to yourself and begin working!
+                        </p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                if st.button("⚡ Claim This Lead", type="primary", use_container_width=True, key=f"ld_claim_btn_{lead_id}"):
+                    try:
+                        api_client.claim_lead(TOKEN, lead_id)
+                        st.toast("Lead claimed successfully! Status updated to In Progress.")
+                        st.rerun()
+                    except APIConflictError as e:
+                        st.error(f"⚠️ {e}")
+                    except APIError as e:
+                        st.error(f"Claim failed: {e}")
+        else:
+            with st.container(border=True):
+                rep_name = lead.get('assigned_rep_name') or 'another representative'
+                st.markdown(
+                    f"""
+                    <div style="padding: 6px 4px;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                            <span style="font-size: 1.2rem;">🔒</span>
+                            <strong style="color: #333; font-size: 0.95rem;">Read-Only Mode</strong>
+                        </div>
+                        <p style="font-size: 0.85rem; color: #555; margin: 0; line-height: 1.4;">
+                            This lead is assigned to <strong>{rep_name}</strong>. You can view contact details, AI insights, and the interaction history, but only the assigned representative or a manager can modify status or add timeline notes.
+                        </p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
     st.markdown("### Interaction History")
 
     # ── Add Note Form (only if can_update) ────────────────────────────
@@ -446,6 +526,8 @@ with left_col:
                 body_html = f'Lead created from <strong>{meta.get("source", "unknown source")}</strong>'
                 if meta.get("referred_by"):
                     body_html += f' (Referred by {meta["referred_by"]})'
+                if meta.get("note"):
+                    body_html += f'<br><em style="color:#555;font-size:0.88rem;">{meta["note"]}</em>'
 
             elif event_type == "appointment_booked":
                 mode = meta.get("mode", "")

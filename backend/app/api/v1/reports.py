@@ -24,6 +24,7 @@ import base64
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, case, literal_column, and_, or_
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -57,7 +58,14 @@ def _period_label(start_date: Optional[date], end_date: Optional[date], period: 
 
 
 async def _get_lead_or_404(lead_id: int, db: AsyncSession) -> Lead:
-    r = await db.execute(select(Lead).where(Lead.id == lead_id))
+    r = await db.execute(
+        select(Lead)
+        .where(Lead.id == lead_id)
+        .options(
+            selectinload(Lead.source),
+            selectinload(Lead.assigned_rep),
+        )
+    )
     lead = r.scalar_one_or_none()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -319,7 +327,10 @@ async def _periodic_leads_data(
     if date_filters:
         q = q.where(and_(*date_filters))
 
-    result = await db.execute(q)
+    result = await db.execute(q.options(
+        selectinload(Lead.source),
+        selectinload(Lead.timeline),
+    ))
     leads = result.scalars().all()
     summary = await _build_periodic_leads_summary(leads)
     summary["period_label"] = _period_label(start_date, end_date, period)

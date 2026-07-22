@@ -19,10 +19,11 @@ router = APIRouter(prefix="/appointments", tags=["Appointments"])
 async def list_appointments(
     lead_id: int | None = None,
     user_id: int | None = None,
+    status: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List appointments. Sales reps see only their own."""
+    """List appointments. Sales reps see only their own. Optional ?status= filter."""
     query = select(Appointment)
     if current_user.role.value == "sales_rep":
         query = query.where(Appointment.user_id == current_user.id)
@@ -30,6 +31,8 @@ async def list_appointments(
         query = query.where(Appointment.user_id == user_id)
     if lead_id:
         query = query.where(Appointment.lead_id == lead_id)
+    if status:
+        query = query.where(Appointment.status == status)
     query = query.order_by(Appointment.start_time.desc())
     result = await db.execute(query)
     return [AppointmentRead.from_orm_appointment(a) for a in result.scalars().all()]

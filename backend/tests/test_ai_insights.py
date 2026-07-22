@@ -172,7 +172,7 @@ class TestPostLeadScore:
 
         other_lead = Lead(
             name="Other Lead",
-            status=LeadStatus.new,
+            status=LeadStatus.unassigned,
             source_id=lead_source.id,
             assigned_rep_id=manager_user.id,
         )

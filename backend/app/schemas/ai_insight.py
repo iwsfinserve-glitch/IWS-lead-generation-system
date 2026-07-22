@@ -2,9 +2,10 @@
 """
 Pydantic schemas for the AI insights API layer.
 
-LeadScoreRead         — response from GET /leads/{id}/ai/score
-ContactTimingRead     — response from GET /leads/{id}/ai/contact-timing
-AIUnavailableResponse — returned when the AI service is unavailable (503 body)
+LeadScoreRead            — response from GET /leads/{id}/ai/score
+ContactTimingRead        — response from GET /leads/{id}/ai/contact-timing
+ClientClassificationRead — response from GET /leads/{id}/ai/client-classification
+AIUnavailableResponse    — returned when the AI service is unavailable (503 body)
 """
 
 from datetime import datetime
@@ -80,3 +81,35 @@ class AIUnavailableResponse(BaseModel):
     """Response body when the AI service returns a 503."""
     available: bool = False
     detail: str = "AI service is temporarily unavailable. Please try again later."
+
+
+class ClientClassificationRead(BaseModel):
+    """Client-classification result returned by the GET/POST endpoint.
+
+    has_sufficient_data=False means the sparse-data guard fired: not enough
+    substantive notes exist yet, no Gemini call was made, and classification
+    is None. The UI should show a neutral 'Gathering data...' indicator.
+    """
+    has_sufficient_data: bool
+    classification: str | None          # "hni" | "professional" | "retail" | None
+    confidence: Literal["low", "medium", "high"]
+    reasoning: str
+    key_indicators: list[str]
+    generated_at: datetime
+    model_used: str
+
+    model_config = {"from_attributes": True}
+
+    @classmethod
+    def from_insight(cls, insight) -> "ClientClassificationRead":
+        """Construct from a LeadAIInsight ORM row (insight_type='client_classification')."""
+        payload = insight.payload
+        return cls(
+            has_sufficient_data=payload["has_sufficient_data"],
+            classification=payload.get("classification"),
+            confidence=payload.get("confidence", "low"),
+            reasoning=payload.get("reasoning", ""),
+            key_indicators=payload.get("key_indicators", []),
+            generated_at=insight.generated_at,
+            model_used=insight.model_used,
+        )

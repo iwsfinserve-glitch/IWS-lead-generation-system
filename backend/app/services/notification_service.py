@@ -82,3 +82,42 @@ async def notify_managers(
         )
         notifications.append(notif)
     return notifications
+
+
+async def notify_sales_reps_and_managers(
+    db: AsyncSession,
+    *,
+    title: str,
+    message: str,
+    notification_type: str,
+    link_type: str | None = None,
+    link_id: int | None = None,
+) -> list[Notification]:
+    """Send a notification to all sales reps and managers (not admins).
+
+    Used for high-priority SEO lead arrivals so the right people can
+    immediately view and claim the lead.
+
+    Returns:
+        List of created Notification instances.
+    """
+    from app.db.base import User
+
+    result = await db.execute(
+        select(User).where(User.role.in_([UserRole.sales_rep, UserRole.manager]))
+    )
+    recipients = result.scalars().all()
+
+    notifications = []
+    for user in recipients:
+        notif = await create_notification(
+            db,
+            user_id=user.id,
+            title=title,
+            message=message,
+            notification_type=notification_type,
+            link_type=link_type,
+            link_id=link_id,
+        )
+        notifications.append(notif)
+    return notifications

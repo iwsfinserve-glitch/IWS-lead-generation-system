@@ -1,3 +1,4 @@
+import html
 import streamlit as st
 from datetime import datetime, date
 from core.auth import require_login
@@ -198,10 +199,10 @@ if USER_ROLE in ("admin", "manager") and len(tabs) > 2:
                     key_prefix="dd",
                     title_field="task_title",
                     subtitle_fn=lambda r: (
-                        f"<b>Requested by:</b> {r.get('requested_by_name', 'N/A')} &nbsp;|&nbsp;"
-                        f"<b>New date:</b> <span style='color:red; font-weight:500;'>{r.get('requested_date', 'N/A')}</span>"
+                        f"<b>Requested by:</b> {html.escape(str(r.get('requested_by_name', 'N/A')))} &nbsp;|&nbsp;"
+                        f"<b>New date:</b> <span style='color:red; font-weight:500;'>{html.escape(str(r.get('requested_date', 'N/A')))}</span>"
                     ),
-                    detail_fn=lambda r: f'"{r.get("reason", "")}"',
+                    detail_fn=lambda r: f'"{html.escape(str(r.get("reason", "")))}"',
                     on_approve=_approve_due_date,
                     on_reject=_reject_due_date,
                 )

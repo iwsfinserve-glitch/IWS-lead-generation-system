@@ -10,12 +10,14 @@ Usage:
     show_lead_panel(lead_id, status_color)
 """
 
+import html
 import streamlit as st
 import time
 from datetime import datetime, date, timedelta
 from core import api_client
 from core.state import state
 from core.api_client import APIError
+from components.cards import classification_badge
 
 
 # ── Shared Constants (re-exported for backwards compatibility) ───────
@@ -28,6 +30,7 @@ from core.constants import (                                           # noqa: F
 # ── Helper Widgets ───────────────────────────────────────────────────
 def status_span(status_type: str, bg_color: str) -> str:
     """Return an HTML badge span for a lead status."""
+    safe_status = html.escape(str(status_type))
     return f"""
     <span style="
     border-radius: 6px;
@@ -38,14 +41,16 @@ def status_span(status_type: str, bg_color: str) -> str:
     text-transform: uppercase;
     letter-spacing: 0.5px;
     ">
-        {status_type}
+        {safe_status}
     </span>
     """
 
 
 def metric_card(label: str, value) -> str:
     """Return an HTML metric card for dashboard summary grids."""
-    return f'<div style="border: 1px solid rgba(54,57,62,0.3); border-radius: 8px; padding: 20px; text-align: center; background-color: white;"><p style="color: #888; font-size: 0.85rem; margin: 0 0 8px 0; text-transform: uppercase; letter-spacing: 1px;">{label}</p><p style="color: red; font-size: 2.2rem; font-weight: 700; margin: 0;">{value}</p></div>'
+    safe_label = html.escape(str(label))
+    safe_val = html.escape(str(value))
+    return f'<div style="border: 1px solid rgba(54,57,62,0.3); border-radius: 8px; padding: 20px; text-align: center; background-color: white;"><p style="color: #888; font-size: 0.85rem; margin: 0 0 8px 0; text-transform: uppercase; letter-spacing: 1px;">{safe_label}</p><p style="color: red; font-size: 2.2rem; font-weight: 700; margin: 0;">{safe_val}</p></div>'
 
 
 # ── Lead Detail Drawer ───────────────────────────────────────────────
@@ -68,7 +73,16 @@ def show_lead_panel(lead_id: int, status_color: str) -> None:
 
     display_status = STATUS_DISPLAY.get(lead["status"], lead["status"])
 
-    st.markdown(f"""<h1 style="display: inline; font-weight: 800;">{lead["name"]}</h1>&nbsp;&nbsp;<h4 style="display: inline; font-weight: 400;">{lead.get("profession") or ""}</h4>""", unsafe_allow_html=True)
+    safe_name = html.escape(str(lead.get("name") or ""))
+    safe_prof = html.escape(str(lead.get("profession") or ""))
+    tier = lead.get("client_classification")
+    tier_badge_html = classification_badge(tier, compact=False)
+    st.markdown(
+        f'<h1 style="display:inline;font-weight:800;">{safe_name}</h1>'
+        f'&nbsp;{tier_badge_html}&nbsp;'
+        f'<h4 style="display:inline;font-weight:400;">{safe_prof}</h4>',
+        unsafe_allow_html=True,
+    )
     st.markdown("---")
 
     # Details section
@@ -110,7 +124,7 @@ def show_lead_panel(lead_id: int, status_color: str) -> None:
                     padding: 20px; text-align: center; margin-bottom: 14px;
                 ">
                     <div style="font-size: 1.15rem; font-weight: 700; color: #0366d6; margin-bottom: 6px;">
-                        ⚡ AI is updating insights in background...
+                        AI is updating insights in background...
                     </div>
                     <div style="font-size: 0.88rem; color: #555;">
                         Analyzing recent interactions and recalculating score & best contact timing (~3s)...
@@ -138,7 +152,6 @@ def show_lead_panel(lead_id: int, status_color: str) -> None:
             timing_data = api_client.get_lead_ai_contact_timing(state.token, lead_id)
         except APIError:
             pass
-
         if score_data or lead.get("ai_score") is not None:
             label = (score_data.get("label") if score_data else lead.get("ai_score_label")) or "warm"
             score_val = score_data.get("score") if score_data else lead.get("ai_score")
@@ -150,28 +163,33 @@ def show_lead_panel(lead_id: int, status_color: str) -> None:
             l_color = label_colors.get(label.lower(), "#f57c00")
 
             score_display = f"Score: {int(score_val)}/100" if score_val is not None else "Scored"
+            safe_reasoning = html.escape(str(score_data["reasoning"])) if score_data and score_data.get("reasoning") else ""
+            safe_signals = ", ".join(html.escape(str(s)) for s in score_data["key_signals"]) if score_data and score_data.get("key_signals") else ""
+            safe_action = html.escape(str(score_data["suggested_next_action"])) if score_data and score_data.get("suggested_next_action") else ""
+
             st.markdown(f"""
             <div style="background: rgba(0,0,0,0.02); border: 1px solid rgba(0,0,0,0.08); border-left: 4px solid {l_color}; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <span style="font-weight: 700; font-size: 1.05rem; color: #222;">
-                        {label.upper()} LEAD
+                        {html.escape(label.upper())} LEAD
                     </span>
                     <span style="background: {l_color}; color: white; font-weight: 700; font-size: 0.8rem; padding: 3px 10px; border-radius: 12px;">
-                        {score_display}
+                        {html.escape(score_display)}
                     </span>
                 </div>
-                {f'<p style="margin: 6px 0; font-size: 0.92rem; color: #444;"><em>"{score_data["reasoning"]}"</em></p>' if score_data and score_data.get("reasoning") else ''}
-                {f'<div style="margin-top: 8px;"><strong>Key Signals:</strong> <span style="color: #444;">' + ', '.join(score_data["key_signals"]) + '</span></div>' if score_data and score_data.get("key_signals") else ''}
-                {f'<div style="margin-top: 8px; padding: 8px 12px; background: #f0f7ff; border-radius: 6px; border-left: 3px solid #0366d6; font-size: 0.88rem;"><strong>Suggested Action:</strong> {score_data["suggested_next_action"]}</div>' if score_data and score_data.get("suggested_next_action") else ''}
+                {f'<p style="margin: 6px 0; font-size: 0.92rem; color: #444;"><em>"{safe_reasoning}"</em></p>' if safe_reasoning else ''}
+                {f'<div style="margin-top: 8px;"><strong>Key Signals:</strong> <span style="color: #444;">' + safe_signals + '</span></div>' if safe_signals else ''}
+                {f'<div style="margin-top: 8px; padding: 8px 12px; background: #f0f7ff; border-radius: 6px; border-left: 3px solid #0366d6; font-size: 0.88rem;"><strong>Suggested Action:</strong> {safe_action}</div>' if safe_action else ''}
             </div>
             """, unsafe_allow_html=True)
         else:
             st.caption("No AI Lead Score generated yet. Add a note or update status to generate insights automatically.")
 
         if timing_data and timing_data.get("has_sufficient_data"):
-            days_str = ", ".join(timing_data.get("suggested_days") or []) or "N/A"
-            window_str = timing_data.get("suggested_window") or "Flexible"
-            conf = (timing_data.get("confidence") or "medium").upper()
+            days_str = ", ".join(html.escape(str(d)) for d in (timing_data.get("suggested_days") or [])) or "N/A"
+            window_str = html.escape(str(timing_data.get("suggested_window") or "Flexible"))
+            conf = html.escape(str((timing_data.get("confidence") or "medium").upper()))
+            safe_timing_reasoning = html.escape(str(timing_data.get("reasoning") or ""))
             st.markdown(f"""
             <div style="background: #fafafa; border: 1px solid rgba(0,0,0,0.08); border-radius: 8px; padding: 12px 16px; margin-bottom: 12px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -181,11 +199,96 @@ def show_lead_panel(lead_id: int, status_color: str) -> None:
                 <p style="margin: 4px 0; font-size: 0.9rem; color: #333;">
                     <strong>Days:</strong> {days_str} &nbsp;|&nbsp; <strong>Window:</strong> {window_str}
                 </p>
-                <p style="margin: 4px 0 0 0; font-size: 0.82rem; color: #666;"><em>{timing_data.get("reasoning", "")}</em></p>
+                <p style="margin: 4px 0 0 0; font-size: 0.82rem; color: #666;"><em>{safe_timing_reasoning}</em></p>
             </div>
             """, unsafe_allow_html=True)
         elif timing_data and not timing_data.get("has_sufficient_data"):
             st.caption(f"Best Time to Contact: {timing_data.get('reasoning')}")
+
+        # ── Client Classification Panel ──────────────────────────────────────────
+        # Try the detailed insight endpoint first (has confidence, key_indicators,
+        # full reasoning). If it 404s, fall back to the denormalized field on the
+        # lead dict which is always present after the first classification.
+        cls_data = None
+        try:
+            cls_data = api_client.get_lead_ai_classification(state.token, lead_id)
+        except APIError:
+            pass
+
+        _TIER_PALETTE = {
+            "hni":          ("#B8860B", "#FFF8DC", "#7A5C00"),  # gold
+            "professional": ("#3730A3", "#EEF2FF", "#1E1B4B"),  # indigo
+            "retail":       ("#475569", "#F8FAFC", "#1E293B"),  # slate
+        }
+
+        if cls_data and cls_data.get("has_sufficient_data") and cls_data.get("classification"):
+            tier = cls_data["classification"]
+            conf_label = html.escape((cls_data.get("confidence") or "low").upper())
+            safe_cls_reasoning = html.escape(str(cls_data.get("reasoning") or ""))
+            indicators = cls_data.get("key_indicators") or []
+            border_c, bg_c, text_c = _TIER_PALETTE.get(tier, ("#475569", "#F8FAFC", "#1E293B"))
+            indicators_html = (
+                "".join(
+                    f'<li style="margin:2px 0;font-size:0.85rem;color:{text_c};">{html.escape(str(ind))}</li>'
+                    for ind in indicators
+                )
+                if indicators else ""
+            )
+            generated = html.escape(str((cls_data.get("generated_at") or "")[:16]).replace("T", " "))
+            st.markdown(f"""
+            <div style="background:{bg_c};border:1px solid {border_c}40;
+                        border-left:4px solid {border_c};
+                        border-radius:8px;padding:14px 16px;margin-bottom:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <span style="font-weight:700;font-size:0.95rem;color:{text_c};">Client Tier Classification</span>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <span style="font-size:0.75rem;color:#666;border:1px solid #ddd;
+                                    padding:2px 8px;border-radius:10px;">Confidence: {conf_label}</span>
+                        <span style="background:linear-gradient(135deg,{border_c},{border_c}cc);
+                                    color:#fff;font-weight:700;font-size:0.8rem;
+                                    padding:3px 12px;border-radius:12px;">{html.escape(tier.upper())}</span>
+                    </div>
+                </div>
+                {f'<p style="margin:6px 0;font-size:0.9rem;color:{text_c};"><em>"{safe_cls_reasoning}"</em></p>' if safe_cls_reasoning else ''}
+                {f'<ul style="margin:8px 0 0 0;padding-left:18px;">{indicators_html}</ul>' if indicators_html else ''}
+                <div style="margin-top:8px;font-size:0.75rem;color:#888;">Last analysed: {generated}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        elif cls_data and not cls_data.get("has_sufficient_data"):
+            # Sparse-data state — neutral/pending, not an error
+            st.markdown("""
+            <div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;
+                        padding:12px 16px;margin-bottom:12px;">
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span style="font-size:1.2rem;">&#8987;</span>
+                    <div>
+                        <span style="font-weight:600;font-size:0.9rem;color:#475569;">Gathering Data for Classification</span><br>
+                        <span style="font-size:0.82rem;color:#64748b;">Add more detailed interaction notes to unlock the AI client tier classification.</span>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        elif lead.get("client_classification"):
+            # Fallback: show from the denormalized Lead field if the detailed endpoint fails
+            tier = lead["client_classification"]
+            border_c, bg_c, text_c = _TIER_PALETTE.get(tier, ("#475569", "#F8FAFC", "#1E293B"))
+            st.markdown(f"""
+            <div style="background:{bg_c};border:1px solid {border_c}40;
+                        border-left:4px solid {border_c};border-radius:8px;
+                        padding:12px 16px;margin-bottom:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-weight:700;font-size:0.95rem;color:{text_c};">Client Tier</span>
+                    <span style="background:linear-gradient(135deg,{border_c},{border_c}cc);
+                                color:#fff;font-weight:700;font-size:0.8rem;
+                                padding:3px 12px;border-radius:12px;">{html.escape(tier.upper())}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        else:
+            st.caption("No client classification yet. Add interaction notes to trigger automatic classification.")
 
     # Check permissions: only assigned rep or admin/manager can update lead details
     user_id = (state.user or {}).get("id")
@@ -193,6 +296,32 @@ def show_lead_panel(lead_id: int, status_color: str) -> None:
     can_update = (user_id is not None) and (user_role in ("admin", "manager") or str(lead.get("assigned_rep_id")) == str(user_id))
 
     if can_update:
+        st.markdown("---")
+
+        # ── Re-classify Client Tier (authorized users only) ─────────────
+        st.markdown('<h2>AI Actions</h2>', unsafe_allow_html=True)
+        reclassify_col, _ = st.columns([1, 2])
+        with reclassify_col:
+            if st.button(
+                "🔄 Re-classify Client Tier",
+                key=f"reclassify_btn_{lead_id}",
+                use_container_width=True,
+                help="Force the AI to re-analyse all interaction notes and update the client tier. Downgrading is allowed.",
+            ):
+                with st.spinner("Running classification..."):
+                    try:
+                        cls_result = api_client.run_lead_ai_classification(state.token, lead_id)
+                        new_tier = cls_result.get("classification")
+                        if cls_result.get("has_sufficient_data") and new_tier:
+                            st.toast(f"✅ Client re-classified as {new_tier.upper()}!", icon="🏷️")
+                        else:
+                            st.toast("⏳ Not enough data yet — add more detailed notes.", icon="📝")
+                        api_client.get_lead_ai_classification.clear()
+                        api_client.get_lead.clear()
+                        st.rerun()
+                    except APIError as e:
+                        st.error(f"Re-classification failed: {e}")
+
         st.markdown("---")
         # Update Lead section
         st.markdown('<h2>Update Lead</h2>', unsafe_allow_html=True)
@@ -298,7 +427,9 @@ def show_lead_panel(lead_id: int, status_color: str) -> None:
                 elif event_type == "note":
                     st.markdown(f"**{ts}** - _{meta.get('note', '')}_")
                 elif event_type == "lead_created":
-                    st.markdown(f"**{ts}** - Lead created from {meta.get('source', 'unknown source')}")
+                    source_text = meta.get("source", "unknown source")
+                    note_text = meta.get("note", "")
+                    st.markdown(f"**{ts}** - Lead created from {source_text}\n\n_{note_text}_" if note_text else f"**{ts}** - Lead created from {source_text}")
                 elif event_type == "appointment_booked":
                     st.markdown(f"**{ts}** - Appointment: {meta.get('title', '')}")
                 else:
@@ -339,7 +470,8 @@ def show_task_panel(task_id: int) -> None:
     is_self_assigned = (assigned_by is None or assigned_by == current_user_id)
     can_edit_due = is_self_assigned or current_role in ("admin", "manager")
 
-    st.markdown(f"""<h1 style="display: inline; font-weight: 800;">{task['title']}</h1>""", unsafe_allow_html=True)
+    safe_title = html.escape(str(task.get('title') or ''))
+    st.markdown(f"""<h1 style="display: inline; font-weight: 800;">{safe_title}</h1>""", unsafe_allow_html=True)
 
     assigned_on = task.get("assigned_on", "")[:10]
     due = task.get("due") or "N/A"
@@ -543,18 +675,22 @@ def show_notifications_panel() -> None:
 
         col_card, col_del = st.columns([6, 0.8])
         with col_card:
+            safe_subj = html.escape(str(subject_title or ""))
+            safe_ptype = html.escape(str(page_type or ""))
+            safe_msg = html.escape(str(clean_msg or ""))
+            safe_created = html.escape(str(created or ""))
             html_str = f'''<div class="overlay-trigger" style="display:flex; flex-direction:column; justify-content:space-between;
             border: 1px solid rgba(54,57,62,0.2); border-left: 4px solid {border_color}; background: {bg_color};
             padding: 12px 16px; border-radius: 6px; margin-bottom: 12px; min-height: 75px; transition: transform 0.15s ease;">
                 <div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px;">
-                    <span style="font-weight:700; font-size:1.02rem; color:#222; line-height:1.3;">{subject_title}</span>
-                    <span style="font-size:0.75rem; font-weight:600; color:{badge_color}; background:rgba(0,0,0,0.06); padding:3px 8px; border-radius:12px; white-space:nowrap;">{page_type}</span>
+                    <span style="font-weight:700; font-size:1.02rem; color:#222; line-height:1.3;">{safe_subj}</span>
+                    <span style="font-size:0.75rem; font-weight:600; color:{badge_color}; background:rgba(0,0,0,0.06); padding:3px 8px; border-radius:12px; white-space:nowrap;">{safe_ptype}</span>
                 </div>
                 <div style="margin-top:6px; font-size:0.88rem; color:#444; line-height:1.4;">
-                    {clean_msg}
+                    {safe_msg}
                 </div>
                 <div style="margin-top:6px; font-size:0.75rem; color:#888; text-align:right;">
-                    {created}
+                    {safe_created}
                 </div>
             </div>'''
             st.markdown(html_str, unsafe_allow_html=True)
@@ -609,7 +745,24 @@ def show_appointment_panel(appt_id: int) -> None:
         st.error("Appointment not found.")
         return
 
-    st.markdown(f"""<h1 style="display: inline; font-weight: 800;">{appt['title']}</h1>""", unsafe_allow_html=True)
+    # ── Status badge ────────────────────────────────────────────────────
+    _STATUS_BADGE = {
+        "upcoming":  ("#2196F3", "Upcoming"),
+        "pending":   ("#FF9800", "Pending"),
+        "completed": ("#4CAF50", "Completed"),
+    }
+    current_status = appt.get("status", "upcoming")
+    badge_color, badge_label = _STATUS_BADGE.get(current_status, ("#888", current_status.title()))
+
+    safe_title = html.escape(str(appt.get('title') or ''))
+    safe_badge = html.escape(str(badge_label))
+    st.markdown(
+        f"""<h1 style="display:inline;font-weight:800;">{safe_title}</h1>"""
+        f"""&nbsp;&nbsp;<span style="background:{badge_color};color:white;border-radius:6px;"""
+        f"""padding:4px 10px;font-size:0.8rem;font-weight:600;vertical-align:middle;">"""
+        f"""{safe_badge}</span>""",
+        unsafe_allow_html=True,
+    )
     st.caption(f"Lead: {appt.get('lead_name', 'N/A')} | By: {appt.get('user_name', 'N/A')}")
     st.markdown("---")
 
@@ -635,6 +788,16 @@ def show_appointment_panel(appt_id: int) -> None:
     new_location = st.text_input("Location", value=appt.get("location") or "", key=f"apt_loc_{appt_id}")
     new_note = st.text_area("Note", value=appt.get("note") or "", height=80, key=f"apt_note_{appt_id}")
 
+    # ── Mark as Completed checkbox (only for non-completed appointments) ─
+    mark_completed = False
+    if current_status != "completed":
+        mark_completed = st.checkbox(
+            "Mark as Completed",
+            value=False,
+            key=f"apt_complete_{appt_id}",
+            help="Tick this and click Save to close out this appointment.",
+        )
+
     col_save, col_del = st.columns(2)
     with col_save:
         if st.button("Save Changes", use_container_width=True, type="primary", key=f"apt_save_{appt_id}"):
@@ -642,16 +805,19 @@ def show_appointment_panel(appt_id: int) -> None:
             new_end_dt = datetime.combine(new_day, new_end_time)
             if new_end_dt <= new_start_dt:
                 new_end_dt = new_start_dt + timedelta(hours=1)
+            payload = {
+                "title": new_title.strip() or appt["title"],
+                "mode": new_mode,
+                "location": new_location.strip() or None,
+                "note": new_note.strip() or None,
+                "start_time": new_start_dt.isoformat(),
+                "end_time": new_end_dt.isoformat(),
+            }
+            if mark_completed:
+                payload["status"] = "completed"
             try:
-                api_client.update_appointment(state.token, appt_id, {
-                    "title": new_title.strip() or appt["title"],
-                    "mode": new_mode,
-                    "location": new_location.strip() or None,
-                    "note": new_note.strip() or None,
-                    "start_time": new_start_dt.isoformat(),
-                    "end_time": new_end_dt.isoformat(),
-                })
-                st.toast("Appointment updated!")
+                api_client.update_appointment(state.token, appt_id, payload)
+                st.toast("Appointment updated!" if not mark_completed else "Appointment marked as completed!")
                 st.rerun()
             except APIError as e:
                 st.error(f"Update failed: {e}")
@@ -682,13 +848,13 @@ def create_lead_dialog() -> None:
 
         col1, col2 = st.columns(2)
         with col1:
-            profession = st.text_input("Profession", placeholder="e.g. Business Owner")
+            profession = st.text_input("Profession *", placeholder="e.g. Business Owner")
         with col2:
-            email = st.text_input("Email", placeholder="e.g. ramesh@example.com")
+            email = st.text_input("Email *", placeholder="e.g. ramesh@example.com")
 
         col3, col4 = st.columns(2)
         with col3:
-            phone = st.text_input("Phone Number", placeholder="e.g. 9876543210")
+            phone = st.text_input("Phone Number *", placeholder="e.g. 9876543210")
         with col4:
             # Lead source dropdown
             try:
@@ -705,6 +871,7 @@ def create_lead_dialog() -> None:
                 st.caption("Could not load sources.")
 
         address = st.text_input("Address", placeholder="e.g. Panaji, Goa")
+        note = st.text_area("Initial Note", placeholder="e.g. Met at trade show, interested in investment options...", height=80)
 
         # Assign-to dropdown: only for admin/manager
         assigned_rep_id = None
@@ -727,16 +894,26 @@ def create_lead_dialog() -> None:
             if not name.strip():
                 st.error("Lead name is required.")
                 return
+            if not profession.strip():
+                st.error("Profession is required.")
+                return
+            if not email.strip():
+                st.error("Email is required.")
+                return
+            if not phone.strip():
+                st.error("Phone number is required.")
+                return
 
-            data = {"name": name.strip()}
-            if profession and profession.strip():
-                data["profession"] = profession.strip()
-            if email and email.strip():
-                data["email"] = email.strip()
-            if phone and phone.strip():
-                data["phone_number"] = phone.strip()
+            data = {
+                "name": name.strip(),
+                "profession": profession.strip(),
+                "email": email.strip(),
+                "phone_number": phone.strip(),
+            }
             if address and address.strip():
                 data["address"] = address.strip()
+            if note and note.strip():
+                data["note"] = note.strip()
             if source_id is not None:
                 data["source_id"] = source_id
 
@@ -747,14 +924,79 @@ def create_lead_dialog() -> None:
                 data["assigned_rep_id"] = assigned_rep_id
 
             try:
-                api_client.create_lead(token, data)
+                new_lead = api_client.create_lead(token, data)
+                if new_lead and isinstance(new_lead, dict) and "id" in new_lead:
+                    st.session_state[f"ai_refresh_pending_{new_lead['id']}"] = time.time()
                 st.toast("Lead created successfully!")
                 st.rerun()
             except APIError as e:
                 st.error(f"Failed to create lead: {e}")
 
 
-@st.dialog("Manage User")
+@st.dialog("Edit Lead", width="medium")
+def edit_lead_dialog(lead: dict) -> None:
+    """Dialog for editing an existing lead (admins only)."""
+    token = state.token
+    
+    with st.form("edit_lead_form", clear_on_submit=False):
+        name = st.text_input("Lead Name *", value=lead.get("name", ""))
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            profession = st.text_input("Profession *", value=lead.get("profession") or "")
+        with col2:
+            email = st.text_input("Email *", value=lead.get("email") or "")
+            
+        col3, col4 = st.columns(2)
+        with col3:
+            phone = st.text_input("Phone Number *", value=lead.get("phone_number") or "")
+        with col4:
+            try:
+                sources = api_client.get_sources(token)
+                source_options = {s["id"]: s["name"] for s in sources}
+                source_options_list = list(source_options.keys())
+                
+                # pre-select current source
+                current_source = lead.get("source_id")
+                default_index = 0
+                if current_source in source_options_list:
+                    default_index = source_options_list.index(current_source) + 1
+                    
+                source_id = st.selectbox(
+                    "Lead Source",
+                    options=[None] + source_options_list,
+                    index=default_index,
+                    format_func=lambda x: "Select Source" if x is None else source_options[x],
+                )
+            except Exception:
+                source_id = lead.get("source_id")
+                st.caption("Could not load sources.")
+                
+        address = st.text_input("Address", value=lead.get("address") or "")
+        
+        submitted = st.form_submit_button("Save Changes", use_container_width=True, type="primary")
+        if submitted:
+            if not name.strip() or not profession.strip() or not email.strip() or not phone.strip():
+                st.error("Name, Profession, Email, and Phone are required.")
+                return
+                
+            data = {
+                "name": name.strip(),
+                "profession": profession.strip(),
+                "email": email.strip(),
+                "phone_number": phone.strip(),
+                "address": address.strip() if address else None,
+                "source_id": source_id,
+            }
+            try:
+                api_client.update_lead(token, lead["id"], data)
+                st.toast("Lead updated successfully!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to update lead: {e}")
+
+
+@st.dialog(" ")
 def manage_user_dialog(token: str, user=None):
     """Dialog for creating or editing a user.
 
@@ -765,12 +1007,13 @@ def manage_user_dialog(token: str, user=None):
         user: Optional dict of existing user data for editing.
               Pass None to create a new user.
     """
-    st.markdown(f"<h3>{'Edit User' if user else 'Create User'}</h3>", unsafe_allow_html=True)
+    st.markdown(f"<h2>{'Edit User' if user else 'Create User'}</h2>", unsafe_allow_html=True)
     with st.form("manage_user_form"):
-        name = st.text_input("Name", value=user['name'] if user else "")
-        email = st.text_input("Email", value=user['email'] if user else "")
+        name = st.text_input("Name*", value=user['name'] if user else "")
+        email = st.text_input("Email*", value=user['email'] if user else "")
+        phone_number = st.text_input("Phone Number*", value=user.get('phone_number') or "" if user else "")
         password = st.text_input(
-            "Password (leave blank to keep current)" if user else "Password",
+            "Password (leave blank to keep current)" if user else "Password *",
             type="password",
         )
         role = st.selectbox(
@@ -800,7 +1043,19 @@ def manage_user_dialog(token: str, user=None):
 
         submitted = st.form_submit_button("Save User")
         if submitted:
-            data = {"name": name, "email": email, "role": role}
+            if not name.strip() or not email.strip() or not phone_number.strip():
+                st.error("Name, Email, and Phone Number cannot be empty.")
+                return
+            if not user and not password:
+                st.error("Password is required when creating a new user.")
+                return
+
+            data = {
+                "name": name.strip(),
+                "email": email.strip(),
+                "phone_number": phone_number.strip(),
+                "role": role,
+            }
             if manager_id is not None:
                 data["manager_id"] = manager_id
             if password:

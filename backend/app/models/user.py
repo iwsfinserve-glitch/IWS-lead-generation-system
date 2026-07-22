@@ -30,6 +30,7 @@ class User(Base):
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    phone_number: Mapped[str] = mapped_column(String(50), nullable=False)
     hashed_password: Mapped[str] = mapped_column(Text, nullable=False)
 
     role: Mapped[UserRole] = mapped_column(
