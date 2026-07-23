@@ -1,7 +1,7 @@
 import streamlit as st
 import asyncio
 from core.api_client import login, get_me, get_users, get_sources, APIError, APIConnectionError, APIAuthError
-from core.auth import save_token_cookie, controller, COOKIE_NAME
+from core.auth import save_token_cookie, get_cookie_controller, COOKIE_NAME
 from core.state import state
 from core.styles import inject_global_styles
 
@@ -18,7 +18,7 @@ if state.token:
     st.stop()
 
 # Try cookie recovery
-saved_token = controller.get(COOKIE_NAME)
+saved_token = get_cookie_controller().get(COOKIE_NAME)
 if saved_token:
     try:
         user = get_me(saved_token)
@@ -27,7 +27,7 @@ if saved_token:
         # UPDATE: Point to the new Dashboard route
         st.switch_page("pages/1_Dashboard.py")
     except Exception:
-        controller.remove(COOKIE_NAME)
+        get_cookie_controller().remove(COOKIE_NAME)
 
 # ── Login Card ──
 st.markdown("<br>", unsafe_allow_html=True)
