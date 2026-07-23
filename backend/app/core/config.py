@@ -20,8 +20,20 @@ class Settings(BaseSettings):
     """
 
     # ── PostgreSQL (async driver) ──────────────────────────────────────
-    # Example: postgresql+asyncpg://postgres:postgres@localhost:5432/lead_crm
     DATABASE_URL: str
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def assemble_db_connection(cls, v: str) -> str:
+        """Ensure DATABASE_URL uses the asyncpg driver for create_async_engine."""
+        if not v:
+            return v
+        v = v.strip()
+        if v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+        if v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
 
     # ── JWT Authentication ─────────────────────────────────────────────
     SECRET_KEY: str

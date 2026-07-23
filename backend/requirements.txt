@@ -5,6 +5,7 @@ uvicorn[standard]
 # ── Database (Async) ──
 sqlalchemy[asyncio]
 asyncpg
+psycopg2-binary
 alembic
 
 # ── Validation & Settings ──
