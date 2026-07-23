@@ -46,35 +46,24 @@ def require_login():
             del st.session_state['_pending_cookie_update']
         return
 
-    # ── Two-render gate: wait for CookieController to initialize ──
-    #
-    # WHY THIS EXISTS:
-    # The CookieController works via a hidden browser iframe. On Render #1 of a
-    # fresh session (e.g. after a page refresh), the iframe has not communicated
-    # its values back to Streamlit yet, so controller.get() returns None even
-    # when a valid cookie is sitting in the browser.
-    #
-    # HOW IT WORKS:
-    # Render #1 → "_cookie_loading" not set → set flag, show spinner, st.stop().
-    #             The iframe renders in the browser, reads cookies, and fires
-    #             a Streamlit rerun event automatically.
-    # Render #2 → "_cookie_loading" is True → skip gate, read real cookie value.
-    #             If cookie exists → restore session. If not → redirect to login.
-    #
-    # SECURITY: We are not skipping authentication. We are deferring the
-    # redirect by exactly one rerun cycle (~200ms). A user with no valid
-    # cookie will still be redirected to login on Render #2.
-    if not st.session_state.get("_cookie_loading"):
-        st.session_state["_cookie_loading"] = True
-        with st.spinner("Authenticating..."):
-            st.stop()  # Pause here; CookieController iframe will trigger Render #2
-
-    # ── Render #2+: Controller is ready — read real cookie value ──
+    # ── 1. ALWAYS execute controller.get() first so the iframe renders into the DOM ──
     saved_token = None
     try:
         saved_token = get_cookie_controller().get(COOKIE_NAME)
     except Exception:
         pass
+
+    # ── 2. Graceful 1-cycle wait for the iframe to fetch cookies ──
+    # If saved_token is None, it might just be because the iframe hasn't sent the
+    # data back yet (Render #1). We show a spinner and `return` cleanly so Streamlit
+    # finishes rendering the page. We DO NOT use st.stop(), which would cause a blank page.
+    if not saved_token and not st.session_state.get("_cookie_checked"):
+        st.session_state["_cookie_checked"] = True
+        with st.spinner("Restoring session..."):
+            pass
+        return
+
+    # ── 3. Render #2+: If we have a token, process it ──
 
     import json
     if saved_token:
