@@ -4,3 +4,13 @@ backgroundColor = "#fafafaff"
 secondaryBackgroundColor = "#e8e8e8ff"
 textColor = "#0E1117"
 font = "monospace"
+
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+enableWebsocketCompression = false
+allowRunOnSave = false
+
+[browser]
+gatherUsageStats = false
