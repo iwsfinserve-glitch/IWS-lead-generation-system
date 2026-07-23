@@ -41,12 +41,35 @@ def require_login():
 
     # ── Fast path: session_state already has a token ──
     if state.token:
-        if hasattr(st.session_state, '_pending_cookie_update'):
-            save_token_cookie(st.session_state._pending_cookie_update)
-            del st.session_state._pending_cookie_update
+        if '_pending_cookie_update' in st.session_state:
+            save_token_cookie(st.session_state['_pending_cookie_update'])
+            del st.session_state['_pending_cookie_update']
         return
 
-    # ── Try to recover from browser cookie ──
+    # ── Two-render gate: wait for CookieController to initialize ──
+    #
+    # WHY THIS EXISTS:
+    # The CookieController works via a hidden browser iframe. On Render #1 of a
+    # fresh session (e.g. after a page refresh), the iframe has not communicated
+    # its values back to Streamlit yet, so controller.get() returns None even
+    # when a valid cookie is sitting in the browser.
+    #
+    # HOW IT WORKS:
+    # Render #1 → "_cookie_loading" not set → set flag, show spinner, st.stop().
+    #             The iframe renders in the browser, reads cookies, and fires
+    #             a Streamlit rerun event automatically.
+    # Render #2 → "_cookie_loading" is True → skip gate, read real cookie value.
+    #             If cookie exists → restore session. If not → redirect to login.
+    #
+    # SECURITY: We are not skipping authentication. We are deferring the
+    # redirect by exactly one rerun cycle (~200ms). A user with no valid
+    # cookie will still be redirected to login on Render #2.
+    if not st.session_state.get("_cookie_loading"):
+        st.session_state["_cookie_loading"] = True
+        with st.spinner("Authenticating..."):
+            st.stop()  # Pause here; CookieController iframe will trigger Render #2
+
+    # ── Render #2+: Controller is ready — read real cookie value ──
     saved_token = None
     try:
         saved_token = get_cookie_controller().get(COOKIE_NAME)
@@ -78,9 +101,9 @@ def require_login():
                 except (APIError, APIConnectionError):
                     pass
                 
-                if hasattr(st.session_state, '_pending_cookie_update'):
-                    save_token_cookie(st.session_state._pending_cookie_update)
-                    del st.session_state._pending_cookie_update
+                if '_pending_cookie_update' in st.session_state:
+                    save_token_cookie(st.session_state['_pending_cookie_update'])
+                    del st.session_state['_pending_cookie_update']
                     
                 return  # Successfully recovered
             except (APIError, APIConnectionError):

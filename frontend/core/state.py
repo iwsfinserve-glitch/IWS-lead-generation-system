@@ -31,7 +31,8 @@ class SessionState:
     def clear(self):
         """Clears all authentication-related state variables."""
         for key in list(st.session_state.keys()):
-            del st.session_state[key]
+            if not key.startswith("_"):
+                del st.session_state[key]
 
 # Singleton instance to be used across the app
 state = SessionState()

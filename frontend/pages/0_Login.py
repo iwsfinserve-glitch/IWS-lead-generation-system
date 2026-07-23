@@ -17,14 +17,22 @@ if state.token:
     st.page_link("pages/1_Dashboard.py", label="Go to Dashboard")
     st.stop()
 
-# Try cookie recovery
+# ── Two-render gate for cookie recovery ──
+# Same pattern as require_login(): on Render #1 the CookieController iframe
+# hasn't loaded yet so get() returns None. We stop here and let the iframe
+# trigger Render #2 before actually reading the cookie.
+if not st.session_state.get("_login_cookie_loading"):
+    st.session_state["_login_cookie_loading"] = True
+    st.stop()  # CookieController iframe will trigger Render #2
+
+# Try cookie recovery (Render #2+, controller is now ready)
 saved_token = get_cookie_controller().get(COOKIE_NAME)
 if saved_token:
     try:
         user = get_me(saved_token)
         state.token = saved_token
         state.user = user
-        # UPDATE: Point to the new Dashboard route
+        # Redirect to Dashboard on successful cookie recovery
         st.switch_page("pages/1_Dashboard.py")
     except Exception:
         get_cookie_controller().remove(COOKIE_NAME)
@@ -78,6 +86,10 @@ with center_col:
                     get_sources(token)
                 except Exception:
                     pass
+
+                # Clear loading flags so they reset properly on next refresh
+                st.session_state.pop("_cookie_loading", None)
+                st.session_state.pop("_login_cookie_loading", None)
 
                 st.switch_page("pages/1_Dashboard.py")
 
