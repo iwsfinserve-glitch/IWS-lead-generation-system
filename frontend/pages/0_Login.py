@@ -73,9 +73,10 @@ with center_col:
                 if refresh_token:
                     state.refresh_token = refresh_token
                 
-                # Save both to cookie as a JSON string
+                # Store payload to be written as a cookie on the next rendered page (Dashboard)
+                # This prevents st.switch_page() from canceling the component's cookie write
                 import json
-                save_token_cookie(json.dumps({"access": token, "refresh": refresh_token}))
+                st.session_state['_pending_cookie_update'] = json.dumps({"access": token, "refresh": refresh_token})
 
                 # Eager Loading: Prime the cache for frequently accessed data
                 try:

@@ -107,21 +107,9 @@ def require_login():
 
 
 def save_token_cookie(token: str):
-    """
-    Save the JWT to a browser cookie that survives page refreshes.
-
-    Security flags:
-    - secure=True      : Cookie is only ever sent over HTTPS, never plain HTTP.
-    - sameSite='Strict': Browser will refuse to send this cookie on any
-                         cross-site request, blocking CSRF attacks.
-    """
+    """Save the JWT to a browser cookie that survives page refreshes."""
     try:
-        get_cookie_controller().set(
-            COOKIE_NAME,
-            token,
-            secure=True,
-            same_site="Strict",
-        )
+        get_cookie_controller().set(COOKIE_NAME, token)
     except Exception:
         pass
 
