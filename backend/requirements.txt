@@ -28,8 +28,9 @@ google-auth-httplib2
 # ── AI Reporting ──
 google-genai
 
-# ── DOCX Report Generation ──
+# ── Report Generation & Charts ──
 python-docx
+matplotlib
 slowapi
 
 # ── Background Scheduler ──
