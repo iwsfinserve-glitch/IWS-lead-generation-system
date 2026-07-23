@@ -13,6 +13,8 @@ class Settings(BaseSettings):
         if not v:
             return "http://localhost:8000/api/v1"
         v = v.strip().rstrip("/")
+        if not (v.startswith("http://") or v.startswith("https://")):
+            v = f"https://{v}"
         if not v.endswith("/api/v1"):
             v = f"{v}/api/v1"
         return v

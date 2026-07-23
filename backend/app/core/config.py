@@ -41,9 +41,6 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
 
     # ── SEO Public Intake API ──────────────────────────────────────────
-    # Required: set SEO_WEB_API_KEY in your .env (or environment).
-    # No default is intentional — the app refuses to start without it.
-    # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
     SEO_WEB_API_KEY: str
 
     @field_validator("SECRET_KEY", mode="before")
@@ -85,13 +82,10 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
     # ── Pydantic-settings config ───────────────────────────────────────
-    # Tells pydantic-settings to read from the .env file located one
-    # directory above this file (backend/.env relative to backend/app/core/).
+    # Read from backend/.env or .env depending on working directory
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=["backend/.env", ".env"],
         env_file_encoding="utf-8",
-        # If a var exists both in the real environment AND the .env file,
-        # the real environment wins. This lets Docker/CI override .env values.
         extra="ignore",
     )
 
