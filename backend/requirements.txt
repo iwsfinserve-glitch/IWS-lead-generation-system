@@ -29,5 +29,7 @@ google-genai
 
 # ── DOCX Report Generation ──
 python-docx
-slowapi  
- 
+slowapi
+
+# ── Background Scheduler ──
+apscheduler
