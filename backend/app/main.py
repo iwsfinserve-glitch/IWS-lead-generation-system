@@ -25,6 +25,9 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
+from app.db.session import engine
+from app.db.base import Base
+
 logger = logging.getLogger(__name__)
 
 limiter = Limiter(key_func=get_remote_address)
@@ -32,7 +35,14 @@ limiter = Limiter(key_func=get_remote_address)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start background scheduler on boot, shut it down on exit."""
+    """Ensure DB schema exists on boot, start background scheduler, shut it down on exit."""
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables verified/created successfully.")
+    except Exception as e:
+        logger.error("Failed to initialize database tables on startup: %s", e)
+
     setup_scheduler()
     scheduler.start()
     # Fire reconcile immediately on startup to catch thresholds crossed while offline
