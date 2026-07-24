@@ -35,7 +35,7 @@ export default function AllLeadsPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [l, s] = await Promise.all([getLeads({ limit: 1000 }), getLeadsSummary().catch(() => ({}))]);
+      const [l, s] = await Promise.all([getLeads({ limit: 20000 }), getLeadsSummary().catch(() => ({}))]);
       setLeads(l);
       setSummary(s);
       if (isManagerOrAdmin) {
