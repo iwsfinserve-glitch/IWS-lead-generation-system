@@ -12,7 +12,7 @@ import openpyxl
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, status, BackgroundTasks, UploadFile, File
-from sqlalchemy import select, or_, update, func
+from sqlalchemy import select, or_, and_, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -120,6 +120,25 @@ async def get_leads_summary(
     }
 
 
+def build_duplicate_condition(name: str, email: str, phone: str):
+    """Returns a SQLAlchemy condition that checks if any 2 of (name, email, phone) match."""
+    conditions = []
+    
+    n_val = (name or "").strip().lower()
+    e_val = (email or "").strip().lower()
+    p_val = (phone or "").strip()
+    
+    if n_val and e_val:
+        conditions.append(and_(func.lower(Lead.name) == n_val, func.lower(Lead.email) == e_val))
+    if n_val and p_val:
+        conditions.append(and_(func.lower(Lead.name) == n_val, Lead.phone_number == p_val))
+    if e_val and p_val:
+        conditions.append(and_(func.lower(Lead.email) == e_val, Lead.phone_number == p_val))
+        
+    if conditions:
+        return or_(*conditions)
+    return None
+
 @router.post("/", response_model=LeadRead, status_code=status.HTTP_201_CREATED)
 async def create_lead(
     payload: LeadCreate,
@@ -132,6 +151,12 @@ async def create_lead(
         src = await db.execute(select(LeadSource).where(LeadSource.id == payload.source_id))
         if not src.scalar_one_or_none():
             raise HTTPException(status_code=404, detail="Source not found")
+
+    dup_cond = build_duplicate_condition(payload.name, payload.email, payload.phone_number)
+    if dup_cond is not None:
+        duplicate = await db.execute(select(Lead.id).where(dup_cond))
+        if duplicate.first():
+            raise HTTPException(status_code=400, detail="Duplicate lead detected (matches at least 2 of Name, Email, or Phone)")
 
     lead_data = payload.model_dump(exclude={"note"})
     if current_user.role.value == "sales_rep":
@@ -384,6 +409,13 @@ async def public_web_lead(
         db.add(seo_source)
         await db.flush()
 
+    # ── Check for duplicate lead ─────────────────────────────────────────
+    dup_cond = build_duplicate_condition(payload.name, payload.email, payload.phone_number)
+    if dup_cond is not None:
+        duplicate = await db.execute(select(Lead.id).where(dup_cond))
+        if duplicate.first():
+            raise HTTPException(status_code=400, detail="Duplicate lead detected (matches at least 2 of Name, Email, or Phone)")
+
     # ── Create the lead ──────────────────────────────────────────────────
     lead = Lead(
         name=payload.name,
@@ -571,10 +603,22 @@ async def bulk_import_leads(
                     await db.flush()
                 source_id = src.id
 
+            l_name = str(name).strip()
+            l_email = str(data.get("email", "")).strip() or None
+            l_phone = str(data.get("phone", data.get("phone no", data.get("phone_number", "")))).strip() or None
+
+            dup_cond = build_duplicate_condition(l_name, l_email, l_phone)
+            if dup_cond is not None:
+                duplicate = await db.execute(select(Lead.id).where(dup_cond))
+                if duplicate.first():
+                    skipped_count += 1
+                    errors.append(f"Row {i}: Skipped due to duplicate lead (matches at least 2 of Name, Email, or Phone)")
+                    continue
+
             lead = Lead(
-                name=str(name).strip(),
-                email=str(data.get("email", "")).strip() or None,
-                phone_number=str(data.get("phone", data.get("phone no", data.get("phone_number", "")))).strip() or None,
+                name=l_name,
+                email=l_email,
+                phone_number=l_phone,
                 profession=str(data.get("profession", "")).strip() or None,
                 address=str(data.get("address", "")).strip() or None,
                 dob=parsed_dob,
