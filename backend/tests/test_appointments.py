@@ -89,6 +89,21 @@ class TestCreateAppointment:
         )
         assert resp.status_code == 422
 
+    async def test_create_appointment_same_time(
+        self, client, admin_token, appointment_payload
+    ):
+        """end_time equal to start_time should be rejected."""
+        same_time = future_time(25)
+        bad_payload = {**appointment_payload,
+                       "start_time": same_time,
+                       "end_time": same_time}
+        resp = await client.post(
+            "/api/v1/appointments/",
+            json=bad_payload,
+            headers=auth_headers(admin_token)
+        )
+        assert resp.status_code == 422
+
     async def test_create_appointment_missing_fields(self, client, admin_token):
         resp = await client.post(
             "/api/v1/appointments/",
@@ -119,6 +134,25 @@ class TestUpdateAppointment:
         )
         assert resp.status_code == 200
         assert resp.json()["title"] == "Follow-up Meeting"
+
+    async def test_update_appointment_invalid_time(
+        self, client, admin_token, appointment_payload
+    ):
+        create_resp = await client.post(
+            "/api/v1/appointments/",
+            json=appointment_payload,
+            headers=auth_headers(admin_token)
+        )
+        assert create_resp.status_code == 201
+        appt_id = create_resp.json()["id"]
+
+        # Updating end_time to be earlier than existing start_time should fail
+        resp = await client.patch(
+            f"/api/v1/appointments/{appt_id}",
+            json={"end_time": future_time(20)},
+            headers=auth_headers(admin_token)
+        )
+        assert resp.status_code == 422
 
     async def test_update_nonexistent_appointment(self, client, admin_token):
         resp = await client.patch(

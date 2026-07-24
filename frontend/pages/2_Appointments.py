@@ -46,28 +46,28 @@ def create_appointment_dialog(prefill_date=None):
     note = st.text_area("Note", height=80, placeholder="Agenda or details...")
 
     if st.button("Create Appointment", use_container_width=True, type="primary"):
-        if title.strip() and lead_id:
+        if not (title.strip() and lead_id):
+            st.warning("Title and Lead are required.")
+        else:
             start_dt = datetime.combine(day, start_time)
             end_dt = datetime.combine(day, end_time)
             if end_dt <= start_dt:
-                end_dt = start_dt + timedelta(hours=1)
-
-            try:
-                api_client.create_appointment(state.token, {
-                    "lead_id": lead_id,
-                    "title": title.strip(),
-                    "note": note.strip() or None,
-                    "mode": mode,
-                    "location": location.strip() or None,
-                    "start_time": start_dt.isoformat(),
-                    "end_time": end_dt.isoformat(),
-                })
-                st.toast("Appointment created!")
-                st.rerun()
-            except APIError as e:
-                st.error(f"Failed to create appointment: {e}")
-        else:
-            st.warning("Title and Lead are required.")
+                st.error("End time must be after start time.")
+            else:
+                try:
+                    api_client.create_appointment(state.token, {
+                        "lead_id": lead_id,
+                        "title": title.strip(),
+                        "note": note.strip() or None,
+                        "mode": mode,
+                        "location": location.strip() or None,
+                        "start_time": start_dt.isoformat(),
+                        "end_time": end_dt.isoformat(),
+                    })
+                    st.toast("Appointment created!")
+                    st.rerun()
+                except APIError as e:
+                    st.error(f"Failed to create appointment: {e}")
 
 
 @st.dialog(" ", width="medium")

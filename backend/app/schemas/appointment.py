@@ -75,3 +75,11 @@ class AppointmentUpdate(BaseModel):
     # Schema-layer guard: clients can only transition to "completed";
     # pending/upcoming are set automatically by the reconcile job.
     status: Literal["completed"] | None = None
+
+    @model_validator(mode="after")
+    def validate_times(self) -> "AppointmentUpdate":
+        if self.start_time is not None and self.end_time is not None:
+            if self.start_time >= self.end_time:
+                raise ValueError("end_time must be after start_time")
+        return self
+

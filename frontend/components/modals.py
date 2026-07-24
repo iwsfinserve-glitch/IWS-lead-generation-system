@@ -804,23 +804,24 @@ def show_appointment_panel(appt_id: int) -> None:
             new_start_dt = datetime.combine(new_day, new_start_time)
             new_end_dt = datetime.combine(new_day, new_end_time)
             if new_end_dt <= new_start_dt:
-                new_end_dt = new_start_dt + timedelta(hours=1)
-            payload = {
-                "title": new_title.strip() or appt["title"],
-                "mode": new_mode,
-                "location": new_location.strip() or None,
-                "note": new_note.strip() or None,
-                "start_time": new_start_dt.isoformat(),
-                "end_time": new_end_dt.isoformat(),
-            }
-            if mark_completed:
-                payload["status"] = "completed"
-            try:
-                api_client.update_appointment(state.token, appt_id, payload)
-                st.toast("Appointment updated!" if not mark_completed else "Appointment marked as completed!")
-                st.rerun()
-            except APIError as e:
-                st.error(f"Update failed: {e}")
+                st.error("End time must be after start time.")
+            else:
+                payload = {
+                    "title": new_title.strip() or appt["title"],
+                    "mode": new_mode,
+                    "location": new_location.strip() or None,
+                    "note": new_note.strip() or None,
+                    "start_time": new_start_dt.isoformat(),
+                    "end_time": new_end_dt.isoformat(),
+                }
+                if mark_completed:
+                    payload["status"] = "completed"
+                try:
+                    api_client.update_appointment(state.token, appt_id, payload)
+                    st.toast("Appointment updated!" if not mark_completed else "Appointment marked as completed!")
+                    st.rerun()
+                except APIError as e:
+                    st.error(f"Update failed: {e}")
     with col_del:
         if st.button("Delete", use_container_width=True, key=f"apt_del_{appt_id}"):
             try:

@@ -97,6 +97,13 @@ async def update_appointment(
     if current_user.role.value == "sales_rep" and appointment.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can only edit your own appointments")
 
+    new_start = payload.start_time if payload.start_time is not None else appointment.start_time
+    new_end = payload.end_time if payload.end_time is not None else appointment.end_time
+    new_start_naive = new_start.replace(tzinfo=None) if new_start.tzinfo else new_start
+    new_end_naive = new_end.replace(tzinfo=None) if new_end.tzinfo else new_end
+    if new_start_naive >= new_end_naive:
+        raise HTTPException(status_code=422, detail="end_time must be after start_time")
+
     update_data = payload.model_dump(exclude_unset=True)
     changes = {}
     for field, value in update_data.items():

@@ -34,8 +34,11 @@ export default function ScheduleAppointmentModal({ leadId, onClose, onCreated })
     if (!form.lead_id) { toast.error('Lead is required'); return; }
 
     const start = new Date(`${form.date}T${form.start_time}`);
-    let end     = new Date(`${form.date}T${form.end_time}`);
-    if (end <= start) end = new Date(start.getTime() + 60 * 60 * 1000);
+    const end   = new Date(`${form.date}T${form.end_time}`);
+    if (end <= start) {
+      toast.error('End time must be after start time');
+      return;
+    }
 
     setSaving(true);
     try {
