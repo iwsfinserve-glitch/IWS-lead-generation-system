@@ -27,8 +27,8 @@ export const addTimelineNote = (id, data) =>
 export const updateTimelineNote = (id, entryId, data) =>
   api.patch(`/leads/${id}/timeline/${entryId}`, data).then((r) => r.data);
 
-export const getLeadsSummary = () =>
-  api.get('/leads/summary').then((r) => r.data);
+export const getLeadsSummary = (params = {}) =>
+  api.get('/leads/summary', { params }).then((r) => r.data);
 
 export const getSources = () =>
   api.get('/sources/').then((r) => r.data);

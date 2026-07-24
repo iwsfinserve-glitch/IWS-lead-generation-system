@@ -164,7 +164,7 @@ function ManagerDashboard() {
   return (
     <>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}>
-        <MetricCard label="My Leads"   value={leads.length}  icon={Target} />
+        <MetricCard label="My Leads"   value={totalLeads}  icon={Target} />
         <MetricCard label="Potential"  value={potential}     icon={TrendingUp} color="var(--accent)" />
         <MetricCard label="Converted"  value={converted}     icon={CheckSquare} color="var(--success)" />
         <MetricCard label="My Team"    value={teamSize}      icon={Users} color="var(--primary-light)"
@@ -248,9 +248,9 @@ function ManagerDashboard() {
         {leads.slice(0, 10).map((l) => <LeadCard key={l.id} lead={l} />)}
         {leads.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>No leads assigned to you yet.</p>}
       </div>
-      {leads.length > 10 && (
+      {totalLeads > 10 && (
         <button className="btn btn-ghost btn-full" style={{ marginTop: 12 }} onClick={() => navigate('/leads')} id="mgr-dashboard-view-all-leads-btn">
-          View all {leads.length} leads
+          View all {totalLeads} leads
         </button>
       )}
 
