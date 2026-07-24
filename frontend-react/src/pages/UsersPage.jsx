@@ -58,21 +58,23 @@ export default function UsersPage() {
       <Navbar title="User Management" />
       <div className="page-container">
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div className="page-header">
           <div>
             <h1 style={{ marginBottom: 4 }}>User Management</h1>
             <p style={{ color: 'var(--text-muted)' }}>{users.length} total users in the system</p>
           </div>
           {isAdmin && (
-            <button className="btn btn-primary" onClick={() => setShowCreate(true)} id="create-user-btn">
-              <Plus size={16} /> New User
-            </button>
+            <div className="page-header-actions">
+              <button className="btn btn-primary" onClick={() => setShowCreate(true)} id="create-user-btn">
+                <Plus size={16} /> New User
+              </button>
+            </div>
           )}
         </div>
 
         {/* Filters */}
-        <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
-          <div className="search-wrap" style={{ flex: 1, minWidth: 220 }}>
+        <div className="filter-toolbar" style={{ marginBottom: 24 }}>
+          <div className="search-wrap" style={{ flex: 1, minWidth: 200 }}>
             <Search size={15} className="search-icon" />
             <input
               className="search-input"
@@ -82,7 +84,7 @@ export default function UsersPage() {
               id="users-search"
             />
           </div>
-          <select className="form-select" style={{ width: 160 }} value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} id="users-role-filter">
+          <select className="form-select" style={{ minWidth: 140 }} value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} id="users-role-filter">
             <option value="">All Roles</option>
             <option value="admin">Admin</option>
             <option value="manager">Manager</option>

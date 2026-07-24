@@ -52,14 +52,14 @@ function SalesRepDashboard() {
 
   return (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}>
+      <div className="metrics-grid">
         <MetricCard label="My Leads" value={totalLeads} icon={Target} />
         <MetricCard label="Unassigned" value={unassigned} icon={Users} color="var(--warning)" />
         <MetricCard label="Potential" value={potential} icon={TrendingUp} color="var(--accent)" />
         <MetricCard label="Converted" value={converted} icon={CheckSquare} color="var(--success)" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 28 }}>
+      <div className="dashboard-grid">
         {/* Upcoming Appointments */}
         <div className="glass-card" style={{ padding: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -102,11 +102,13 @@ function SalesRepDashboard() {
       </div>
 
       {/* My Leads */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div className="page-header">
         <h2 style={{ margin: 0 }}>My Leads</h2>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)} id="dashboard-create-lead-btn">
-          <Plus size={14} /> New Lead
-        </button>
+        <div className="page-header-actions">
+          <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)} id="dashboard-create-lead-btn">
+            <Plus size={14} /> New Lead
+          </button>
+        </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {leads.slice(0, 10).map((l) => <LeadCard key={l.id} lead={l} />)}
@@ -163,7 +165,7 @@ function ManagerDashboard() {
 
   return (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}>
+      <div className="metrics-grid">
         <MetricCard label="My Leads"   value={totalLeads}  icon={Target} />
         <MetricCard label="Potential"  value={potential}     icon={TrendingUp} color="var(--accent)" />
         <MetricCard label="Converted"  value={converted}     icon={CheckSquare} color="var(--success)" />
@@ -195,7 +197,7 @@ function ManagerDashboard() {
         <ChevronRight size={16} color="var(--text-muted)" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 28 }}>
+      <div className="dashboard-grid">
         {/* Upcoming Appointments */}
         <div className="glass-card" style={{ padding: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -238,11 +240,13 @@ function ManagerDashboard() {
       </div>
 
       {/* My Leads */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div className="page-header">
         <h2 style={{ margin: 0 }}>My Leads</h2>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)} id="mgr-dashboard-create-lead-btn">
-          <Plus size={14} /> New Lead
-        </button>
+        <div className="page-header-actions">
+          <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)} id="mgr-dashboard-create-lead-btn">
+            <Plus size={14} /> New Lead
+          </button>
+        </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {leads.slice(0, 10).map((l) => <LeadCard key={l.id} lead={l} />)}
@@ -281,18 +285,20 @@ function AdminDashboard() {
 
   return (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}>
+      <div className="metrics-grid">
         <MetricCard label="Total Users" value={users.length} icon={Users} />
         <MetricCard label="Admins"      value={admins}       icon={Users} color="var(--primary-light)" />
         <MetricCard label="Managers"    value={managers}     icon={Users} color="var(--accent)" />
         <MetricCard label="Sales Reps"  value={reps}         icon={Users} color="var(--success)" />
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div className="page-header">
         <h2 style={{ margin: 0 }}>User Directory ({users.length})</h2>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)} id="admin-create-user-btn">
-          <Plus size={14} /> New User
-        </button>
+        <div className="page-header-actions">
+          <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)} id="admin-create-user-btn">
+            <Plus size={14} /> New User
+          </button>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>

@@ -89,7 +89,8 @@ export default function LoginPage() {
         </div>
 
         {/* Card */}
-        <div className="glass-card" style={{ padding: '32px 36px' }}>
+        <div className="glass-card login-card">
+
           <form onSubmit={handleSubmit} id="login-form">
             <div className="form-group">
               <label className="form-label" htmlFor="login-email">Email Address</label>

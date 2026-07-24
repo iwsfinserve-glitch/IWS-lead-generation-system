@@ -126,12 +126,12 @@ export default function AllLeadsPage() {
       <Navbar title="All Leads" />
       <div className="page-container">
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div className="page-header">
           <div>
             <h1 style={{ marginBottom: 4 }}>Lead Directory</h1>
             <p style={{ color: 'var(--text-muted)' }}>Manage and track all your leads in one place.</p>
           </div>
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div className="page-header-actions">
             {isManagerOrAdmin && (
               <button className="btn btn-ghost" onClick={() => setShowBulkImport(true)}>
                 Bulk Import
@@ -144,8 +144,8 @@ export default function AllLeadsPage() {
         </div>
 
         {/* Search */}
-        <div style={{ marginBottom: 20 }}>
-          <div className="search-wrap" style={{ maxWidth: 400 }}>
+        <div className="filter-toolbar" style={{ marginBottom: 20 }}>
+          <div className="search-wrap" style={{ flex: 1, minWidth: 200 }}>
             <Search size={15} className="search-icon" />
             <input
               className="search-input"
@@ -262,11 +262,13 @@ export default function AllLeadsPage() {
           bottom: 24, left: '50%', transform: 'translateX(-50%)',
           background: 'var(--bg-elevated)', border: '1px solid var(--border)',
           borderRadius: 50, padding: '12px 24px',
-          display: 'flex', alignItems: 'center', gap: 20,
-          boxShadow: '0 8px 30px rgba(0,0,0,0.12)', zIndex: 100
+          display: 'flex', alignItems: 'center', gap: 12,
+          boxShadow: '0 8px 30px rgba(0,0,0,0.12)', zIndex: 100,
+          flexWrap: 'wrap', justifyContent: 'center',
+          maxWidth: 'calc(100vw - 32px)',
         }}>
           <span style={{ fontWeight: 600 }}>{selectedLeadIds.size} leads selected</span>
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="btn btn-ghost btn-sm" onClick={() => setSelectedLeadIds(new Set())}>Clear</button>
             {user?.role === 'admin' && (
               <button className="btn btn-danger btn-sm" onClick={handleBulkDelete}>Delete</button>

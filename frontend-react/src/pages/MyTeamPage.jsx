@@ -60,12 +60,13 @@ export default function MyTeamPage() {
           </p>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}>
+        <div className="metrics-grid">
           <MetricCard label="Team Members" value={teamMembers.length}  icon={Users}       />
           <MetricCard label="Total Leads"  value={totalLeads}          icon={Target}      color="var(--accent)" />
           <MetricCard label="Active"       value={totalActive}         icon={TrendingUp}  color="var(--warning)" />
           <MetricCard label="Converted"    value={totalConverted}      icon={CheckSquare} color="var(--success)" />
         </div>
+
 
         {teamMembers.length === 0 ? (
           <div className="empty-state">

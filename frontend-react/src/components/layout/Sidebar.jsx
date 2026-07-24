@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Users2, Target, Calendar, CheckSquare,
-  BarChart3, LogOut, ChevronRight, Zap,
+  BarChart3, LogOut, Zap, X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -28,7 +28,7 @@ function getInitials(name = '') {
 
 const ROLE_LABELS = { admin: 'Admin', manager: 'Manager', sales_rep: 'Sales Rep' };
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, onClose }) {
   const { user, logout, isAdmin, isManagerOrAdmin } = useAuth();
   const navigate = useNavigate();
 
@@ -38,22 +38,47 @@ export default function Sidebar() {
     navigate('/login');
   };
 
+  // Auto-close sidebar on nav link click (mobile)
+  const handleNavClick = () => {
+    if (onClose) onClose();
+  };
+
   return (
-    <aside className="sidebar">
-      {/* Logo */}
+    <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
+      {/* Logo row — includes close button on mobile */}
       <div className="sidebar-logo">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
           <div style={{
             width: 32, height: 32, borderRadius: 8,
             background: 'linear-gradient(135deg, var(--primary), var(--accent))',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
           }}>
             <Zap size={16} color="#fff" />
           </div>
-          <div>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div className="sidebar-logo-text">IWS Finserv</div>
             <div className="sidebar-logo-sub">Lead CRM</div>
           </div>
+          {/* Close button — only visible on mobile via CSS */}
+          <button
+            className="sidebar-close-btn"
+            onClick={onClose}
+            aria-label="Close navigation"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              padding: 4,
+              borderRadius: 6,
+              display: 'flex',
+              alignItems: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <X size={18} />
+          </button>
         </div>
       </div>
 
@@ -66,6 +91,7 @@ export default function Sidebar() {
             key={to}
             to={to}
             className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+            onClick={handleNavClick}
           >
             <Icon size={16} className="nav-icon" />
             {label}
@@ -80,6 +106,7 @@ export default function Sidebar() {
                 key={to}
                 to={to}
                 className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+                onClick={handleNavClick}
               >
                 <Icon size={16} className="nav-icon" />
                 {label}
@@ -91,6 +118,7 @@ export default function Sidebar() {
                 key={to}
                 to={to}
                 className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+                onClick={handleNavClick}
               >
                 <Icon size={16} className="nav-icon" />
                 {label}
@@ -104,7 +132,7 @@ export default function Sidebar() {
       <div className="sidebar-user">
         <div className="sidebar-user-info">
           <div className="sidebar-avatar">{getInitials(user?.name)}</div>
-          <div style={{ minWidth: 0 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div className="sidebar-user-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {user?.name}
             </div>

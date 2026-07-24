@@ -244,15 +244,15 @@ export default function AppointmentsPage() {
       <Navbar title="Appointments" />
       <div className="page-container">
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+        <div className="page-header">
           <div>
             <h1 style={{ marginBottom: 4 }}>Appointments</h1>
             <p style={{ color: 'var(--text-muted)' }}>{appointments.length} total appointments</p>
           </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <div className="page-header-actions">
             {/* Google Calendar status */}
             {googleStatus.google_connected ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <span style={{ padding: '6px 12px', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 8, fontSize: '0.8rem', color: '#34d399', fontWeight: 600 }}>
                   ✓ Google Calendar Synced
                 </span>
@@ -273,6 +273,7 @@ export default function AppointmentsPage() {
             </button>
           </div>
         </div>
+
 
         {/* View toggle */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>

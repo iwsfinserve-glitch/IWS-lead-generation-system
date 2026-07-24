@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/layout/ProtectedRoute';
 import Sidebar from './components/layout/Sidebar';
+import Navbar from './components/layout/Navbar';
 
 import LoginPage        from './pages/LoginPage';
 import DashboardPage    from './pages/DashboardPage';
@@ -17,11 +19,24 @@ import MyTeamPage       from './pages/MyTeamPage';
 
 // Layout wrapper for authenticated pages
 function AppLayout() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const closeSidebar = () => setSidebarOpen(false);
+  const toggleSidebar = () => setSidebarOpen((prev) => !prev);
+
   return (
     <div className="app-layout">
-      <Sidebar />
+      {/* Mobile backdrop */}
+      <div
+        className={`sidebar-backdrop ${sidebarOpen ? 'open' : ''}`}
+        onClick={closeSidebar}
+        aria-hidden="true"
+      />
+
+      <Sidebar isOpen={sidebarOpen} onClose={closeSidebar} />
+
       <div className="main-content">
-        <Outlet />
+        <Outlet context={{ toggleSidebar }} />
       </div>
     </div>
   );

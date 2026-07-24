@@ -1,16 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, CheckCheck, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Bell, CheckCheck, Menu } from 'lucide-react';
+import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { getNotifications, getUnreadCount, markNotificationRead, markAllRead } from '../../api/notificationsApi';
 
 export default function Navbar({ title }) {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const outletCtx = useOutletContext?.() || {};
+  const toggleSidebar = outletCtx.toggleSidebar;
+
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [loading, setLoading] = useState(false);
   const dropdownRef = useRef(null);
 
   const fetchNotifs = async () => {
@@ -29,7 +31,7 @@ export default function Navbar({ title }) {
   useEffect(() => {
     if (!user) return;
     fetchNotifs();
-    const interval = setInterval(fetchNotifs, 10000); // poll every 10 seconds for real-time updates
+    const interval = setInterval(fetchNotifs, 10000); // poll every 10 seconds
     return () => clearInterval(interval);
   }, [user]);
 
@@ -45,9 +47,7 @@ export default function Navbar({ title }) {
   }, []);
 
   const handleToggle = () => {
-    if (!isOpen) {
-      fetchNotifs();
-    }
+    if (!isOpen) fetchNotifs();
     setIsOpen(!isOpen);
   };
 
@@ -85,7 +85,21 @@ export default function Navbar({ title }) {
 
   return (
     <header className="navbar">
-      <span className="navbar-title">{title}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {/* Hamburger — only visible on mobile via CSS */}
+        {toggleSidebar && (
+          <button
+            className="mobile-menu-btn"
+            onClick={toggleSidebar}
+            aria-label="Toggle navigation"
+            id="mobile-menu-toggle"
+          >
+            <Menu size={20} />
+          </button>
+        )}
+        <span className="navbar-title">{title}</span>
+      </div>
+
       <div className="navbar-actions" style={{ position: 'relative' }} ref={dropdownRef}>
         <button
           className="btn btn-ghost btn-icon"
@@ -120,6 +134,7 @@ export default function Navbar({ title }) {
 
         {isOpen && (
           <div
+            className="notif-dropdown"
             style={{
               position: 'absolute',
               top: 'calc(100% + 8px)',
@@ -196,7 +211,7 @@ export default function Navbar({ title }) {
         )}
 
         <div style={{ width: 1, height: 24, background: 'var(--border)' }} />
-        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {user?.name}
         </div>
       </div>

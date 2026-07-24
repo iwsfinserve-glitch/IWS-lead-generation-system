@@ -164,14 +164,16 @@ export default function TasksPage() {
       <Navbar title="Tasks" />
       <div className="page-container">
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div className="page-header">
           <div>
             <h1 style={{ marginBottom: 4 }}>Tasks</h1>
             <p style={{ color: 'var(--text-muted)' }}>{pending.length} pending · {completed.length} completed</p>
           </div>
-          <button className="btn btn-primary" onClick={() => setShowCreate(true)} id="create-task-btn">
-            <Plus size={16} /> New Task
-          </button>
+          <div className="page-header-actions">
+            <button className="btn btn-primary" onClick={() => setShowCreate(true)} id="create-task-btn">
+              <Plus size={16} /> New Task
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}

@@ -323,7 +323,7 @@ export default function LeadDetailsPage() {
         </div>
 
         {/* Contact info */}
-        <div className="glass-card" style={{ padding: '18px 20px', marginBottom: 24, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+        <div className="glass-card" style={{ padding: '18px 20px', marginBottom: 24, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
           {[
             { icon: Mail, label: 'Email', value: lead.email },
             { icon: Phone, label: 'Phone', value: lead.phone_number },
@@ -363,7 +363,7 @@ export default function LeadDetailsPage() {
         )}
 
         {/* Two-column layout */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 24, alignItems: 'start' }}>
+        <div className="detail-grid">
           {/* Left — Timeline + Actions */}
           <div>
             {/* Actions */}
