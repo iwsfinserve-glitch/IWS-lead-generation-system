@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 
 export default function UsersPage() {
-  const { isAdmin } = useAuth();
+  const { user: currentUser, isAdmin } = useAuth();
   const navigate = useNavigate();
   const [users, setUsers]         = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -124,7 +124,7 @@ export default function UsersPage() {
                     </div>
                   </div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    ✉️ {u.email}
+                    ✉️ {u.email} {u.phone_number ? ` · 📞 ${u.phone_number}` : ''}
                   </div>
                   {isAdmin && (
                     <div style={{ display: 'flex', gap: 8 }} onClick={(e) => e.stopPropagation()}>
@@ -135,24 +135,26 @@ export default function UsersPage() {
                       >
                         Edit
                       </button>
-                      {deleteTarget?.id === u.id ? (
-                        <>
-                          <button className="btn btn-danger btn-sm" onClick={() => handleDelete(u)} id={`confirm-delete-${u.id}`}>
-                            Confirm Delete
+                      {u.id !== currentUser?.id && (
+                        deleteTarget?.id === u.id ? (
+                          <>
+                            <button className="btn btn-danger btn-sm" onClick={() => handleDelete(u)} id={`confirm-delete-${u.id}`}>
+                              Confirm Delete
+                            </button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setDeleteTarget(null)} id={`cancel-delete-${u.id}`}>
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ color: 'var(--danger)' }}
+                            onClick={(e) => { e.stopPropagation(); setDeleteTarget(u); }}
+                            id={`delete-user-btn-${u.id}`}
+                          >
+                            Delete
                           </button>
-                          <button className="btn btn-ghost btn-sm" onClick={() => setDeleteTarget(null)} id={`cancel-delete-${u.id}`}>
-                            Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          style={{ color: 'var(--danger)' }}
-                          onClick={(e) => { e.stopPropagation(); setDeleteTarget(u); }}
-                          id={`delete-user-btn-${u.id}`}
-                        >
-                          Delete
-                        </button>
+                        )
                       )}
                     </div>
                   )}

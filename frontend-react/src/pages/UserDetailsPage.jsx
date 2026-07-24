@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2 } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
-import { getUser } from '../api/usersApi';
+import { getUser, deleteUser } from '../api/usersApi';
 import { getLeads } from '../api/leadsApi';
 import { getTasks } from '../api/tasksApi';
 import { getAppointments } from '../api/appointmentsApi';
@@ -15,14 +15,15 @@ import toast from 'react-hot-toast';
 export default function UserDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
-  const [user, setUser]     = useState(null);
-  const [leads, setLeads]   = useState([]);
-  const [tasks, setTasks]   = useState([]);
-  const [appts, setAppts]   = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [tab, setTab]       = useState('leads');
+  const { user: currentUser, isAdmin } = useAuth();
+  const [user, setUser]         = useState(null);
+  const [leads, setLeads]       = useState([]);
+  const [tasks, setTasks]       = useState([]);
+  const [appts, setAppts]       = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [tab, setTab]           = useState('leads');
   const [showEdit, setShowEdit] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -42,6 +43,16 @@ export default function UserDetailsPage() {
   };
 
   useEffect(() => { fetchAll(); }, [id]);
+
+  const handleDelete = async () => {
+    try {
+      await deleteUser(user.id);
+      toast.success(`${user.name} deleted successfully`);
+      navigate('/users');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete user');
+    }
+  };
 
   if (loading) return (
     <>
@@ -84,13 +95,32 @@ export default function UserDetailsPage() {
             </div>
             <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>📧 {user.email}</div>
+              {user.phone_number && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>📞 {user.phone_number}</div>}
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>📊 {leads.length} leads · {pendingTasks} pending tasks · {doneTasks} tasks done</div>
             </div>
           </div>
           {isAdmin && (
-            <button className="btn btn-secondary btn-sm" onClick={() => setShowEdit(true)} id="edit-user-btn">
-              <Edit size={14} /> Edit User
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowEdit(true)} id="edit-user-btn">
+                <Edit size={14} /> Edit User
+              </button>
+              {user.id !== currentUser?.id && (
+                showDeleteConfirm ? (
+                  <>
+                    <button className="btn btn-danger btn-sm" onClick={handleDelete} id="confirm-delete-user-btn">
+                      Confirm Delete
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setShowDeleteConfirm(false)} id="cancel-delete-user-btn">
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button className="btn btn-danger btn-sm" onClick={() => setShowDeleteConfirm(true)} id="delete-user-btn">
+                    <Trash2 size={14} /> Delete User
+                  </button>
+                )
+              )}
+            </div>
           )}
         </div>
 

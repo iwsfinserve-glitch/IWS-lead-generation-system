@@ -5,6 +5,9 @@ from datetime import datetime, date, timedelta, timezone
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select
