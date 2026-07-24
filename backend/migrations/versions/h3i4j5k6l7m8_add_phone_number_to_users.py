@@ -20,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # 1. Add phone_number as nullable first to avoid error on existing rows
-    op.add_column('users', sa.Column('phone_number', sa.String(length=50), nullable=True))
+    op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(50);")
     
     # 2. Backfill existing user rows with a default phone number
     op.execute("UPDATE users SET phone_number = '+91 00000 00000' WHERE phone_number IS NULL")

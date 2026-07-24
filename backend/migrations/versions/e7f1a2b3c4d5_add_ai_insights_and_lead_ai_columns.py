@@ -60,17 +60,9 @@ def upgrade() -> None:
     )
 
     # ── 2. Add denormalized AI columns to leads ──────────────────────────
-    op.add_column("leads", sa.Column("ai_score", sa.Float(), nullable=True))
-    op.add_column(
-        "leads",
-        sa.Column("ai_score_label", sa.String(length=10), nullable=True),
-    )
-    op.add_column(
-        "leads",
-        sa.Column(
-            "ai_score_updated_at", sa.DateTime(timezone=True), nullable=True
-        ),
-    )
+    op.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS ai_score DOUBLE PRECISION;")
+    op.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS ai_score_label VARCHAR(10);")
+    op.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS ai_score_updated_at TIMESTAMPTZ;")
 
 
 def downgrade() -> None:

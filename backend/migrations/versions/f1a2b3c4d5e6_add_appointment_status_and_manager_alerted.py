@@ -23,29 +23,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "appointments",
-        sa.Column(
-            "status",
-            sa.String(length=50),
-            nullable=False,
-            server_default="upcoming",
-        ),
-    )
-    op.add_column(
-        "appointments",
-        sa.Column(
-            "manager_alerted",
-            sa.Boolean(),
-            nullable=False,
-            server_default="false",
-        ),
-    )
-    op.create_index(
-        "ix_appointments_status_end_time",
-        "appointments",
-        ["status", "end_time"],
-    )
+    op.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'upcoming' NOT NULL;")
+    op.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS manager_alerted BOOLEAN DEFAULT false NOT NULL;")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_appointments_status_end_time ON appointments(status, end_time);")
 
 
 def downgrade() -> None:

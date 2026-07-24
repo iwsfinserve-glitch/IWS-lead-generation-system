@@ -42,8 +42,8 @@ def upgrade() -> None:
                existing_type=sa.INTEGER(),
                comment='NULL for system-generated entries (e.g. SEO web form intake)',
                existing_nullable=True)
-    op.add_column('leads', sa.Column('client_classification', sa.String(length=20), nullable=True, comment="'hni' | 'professional' | 'retail' | NULL (unclassified)"))
-    op.add_column('leads', sa.Column('client_classification_updated_at', sa.DateTime(timezone=True), nullable=True))
+    op.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS client_classification VARCHAR(20);")
+    op.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS client_classification_updated_at TIMESTAMPTZ;")
     op.alter_column('leads', 'ai_score_label',
                existing_type=sa.VARCHAR(length=10),
                comment="'hot' | 'warm' | 'cold' — mirrors latest LeadAIInsight.payload.label",
