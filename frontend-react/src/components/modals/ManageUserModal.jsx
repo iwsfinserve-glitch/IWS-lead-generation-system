@@ -8,11 +8,12 @@ export default function ManageUserModal({ user: existingUser, onClose, onSaved }
   const isEdit = !!existingUser;
   const [managers, setManagers] = useState([]);
   const [form, setForm] = useState({
-    name:       existingUser?.name || '',
-    email:      existingUser?.email || '',
-    password:   '',
-    role:       existingUser?.role || 'sales_rep',
-    manager_id: existingUser?.manager_id || '',
+    name:         existingUser?.name || '',
+    email:        existingUser?.email || '',
+    phone_number: existingUser?.phone_number || '',
+    password:     '',
+    role:         existingUser?.role || 'sales_rep',
+    manager_id:   existingUser?.manager_id || '',
   });
   const [saving, setSaving] = useState(false);
 
@@ -24,12 +25,20 @@ export default function ManageUserModal({ user: existingUser, onClose, onSaved }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.name.trim() || !form.email.trim()) { toast.error('Name and email are required'); return; }
+    if (!form.name.trim() || !form.email.trim() || !form.phone_number.trim()) {
+      toast.error('Name, email, and phone number are required');
+      return;
+    }
     if (!isEdit && !form.password) { toast.error('Password is required for new users'); return; }
 
     setSaving(true);
     try {
-      const payload = { name: form.name.trim(), email: form.email.trim(), role: form.role };
+      const payload = {
+        name: form.name.trim(),
+        email: form.email.trim(),
+        phone_number: form.phone_number.trim(),
+        role: form.role,
+      };
       if (form.password) payload.password = form.password;
       if (form.manager_id) payload.manager_id = parseInt(form.manager_id);
 
@@ -60,6 +69,11 @@ export default function ManageUserModal({ user: existingUser, onClose, onSaved }
           <label className="form-label">Email *</label>
           <input className="form-input" type="email" placeholder="jane@iwsfinserve.com" value={form.email}
             onChange={(e) => set('email', e.target.value)} id="user-email" />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Phone Number *</label>
+          <input className="form-input" type="tel" placeholder="+91 98765 43210" value={form.phone_number}
+            onChange={(e) => set('phone_number', e.target.value)} id="user-phone" />
         </div>
         <div className="form-group">
           <label className="form-label">{isEdit ? 'New Password (leave blank to keep)' : 'Password *'}</label>

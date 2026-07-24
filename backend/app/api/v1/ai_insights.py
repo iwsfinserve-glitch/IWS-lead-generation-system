@@ -168,7 +168,7 @@ async def score_lead(
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="AI service is temporarily unavailable. Please try again later.",
+            detail=f"AI service unavailable: {str(exc)}",
         )
 
     # Persist insight row
@@ -322,7 +322,7 @@ async def analyze_contact_timing(
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="AI service is temporarily unavailable. Please try again later.",
+            detail=f"AI service unavailable: {str(exc)}",
         )
 
     # Persist insight — even sparse-data results are stored so the UI

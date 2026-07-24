@@ -83,6 +83,9 @@ async def trigger_ai_analysis_background(lead_id: int) -> None:
             except Exception:
                 logger.exception("Unexpected error during background AI scoring for lead %d", lead_id)
 
+            import asyncio
+            await asyncio.sleep(1)
+
             # ── 2. Run Contact Timing ────────────────────────────────────────
             try:
                 timing_context = await _build_contact_timing_context(lead, db)

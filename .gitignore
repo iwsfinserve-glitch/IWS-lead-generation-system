@@ -9,6 +9,10 @@ frontend_improvement_plan.md
 test.py
 seed.py
 test_login.py
+backup_db.py
+clear_db.py
+seed_backup.json
+backend/seed_backup.json
 .env
 .pytest_cache/
 /*.md

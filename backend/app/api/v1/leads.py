@@ -20,7 +20,7 @@ from app.db.base import User, Lead, LeadSource, LeadTimeline
 from app.models.enums import LeadStatus
 from app.schemas.lead import (
     LeadCreate, LeadRead, LeadUpdate,
-    LeadTimelineCreate, LeadTimelineRead,
+    LeadTimelineCreate, LeadTimelineRead, LeadTimelineUpdate,
     WebLeadCreate,
 )
 from app.schemas.bulk_lead import (
@@ -286,6 +286,45 @@ async def add_timeline_entry(
         event_metadata=payload.event_metadata,
     )
     db.add(entry)
+    background_tasks.add_task(trigger_ai_analysis_background, lead_id)
+    await db.commit()
+    await db.refresh(entry)
+    return LeadTimelineRead.from_orm_timeline(entry)
+
+
+@router.patch("/{lead_id}/timeline/{entry_id}", response_model=LeadTimelineRead)
+async def update_timeline_entry(
+    lead_id: int,
+    entry_id: int,
+    payload: LeadTimelineUpdate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update an existing timeline note."""
+    lead = await _get_lead_or_404(lead_id, db)
+    _check_lead_write_access(lead, current_user)
+
+    result = await db.execute(
+        select(LeadTimeline).where(LeadTimeline.id == entry_id, LeadTimeline.lead_id == lead_id)
+    )
+    entry = result.scalar_one_or_none()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Timeline entry not found")
+        
+    if entry.event_type != "note":
+        raise HTTPException(status_code=400, detail="Only note entries can be edited")
+        
+    # Only the author or an admin/manager can edit
+    if entry.user_id != current_user.id and current_user.role.value not in ["admin", "manager"]:
+        raise HTTPException(status_code=403, detail="Not authorized to edit this note")
+
+    # Make a copy of the metadata to update it, as JSON columns may need reassignment
+    metadata = dict(entry.event_metadata)
+    metadata["note"] = payload.note
+    metadata["edited_at"] = datetime.utcnow().isoformat()
+    entry.event_metadata = metadata
+
     background_tasks.add_task(trigger_ai_analysis_background, lead_id)
     await db.commit()
     await db.refresh(entry)

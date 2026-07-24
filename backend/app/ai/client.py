@@ -111,10 +111,9 @@ class AIClient:
             except Exception as exc:
                 if _is_rate_limit_error(exc):
                     if attempt < retries:
-                        # Gemini free tier RPM limit backoff (usually 15 RPM, wait 26-30s)
-                        await asyncio.sleep(26 + attempt * 2)
+                        await asyncio.sleep(1.5 * (attempt + 1))
                         continue
-                    raise AIRateLimitError(f"Gemini rate limit exceeded after retries: {exc}") from exc
+                    raise AIRateLimitError(f"Gemini rate limit exceeded: {exc}") from exc
                 raise AIServiceError(f"Gemini SDK call failed: {exc}") from exc
 
     # ── Public API ──────────────────────────────────────────────────────

@@ -3,8 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Phone, Mail, MapPin, User, Calendar, Edit, Trash2, Zap, Lock } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import { StatusBadge, STATUS_DISPLAY, STATUS_COLOR } from '../components/common/StatusBadge';
-import { getLead, getLeadTimeline, addTimelineNote, updateLead, deleteLead, claimLead, getSalesReps } from '../api/leadsApi';
-import { getLeadAIScore, triggerLeadAIScore, getLeadAIContactTiming } from '../api/aiApi';
+import { getLead, getLeadTimeline, addTimelineNote, updateTimelineNote, updateLead, deleteLead, claimLead, getSalesReps } from '../api/leadsApi';
+import { getLeadAIScore, triggerLeadAIScore, getLeadAIContactTiming, triggerLeadAIContactTiming } from '../api/aiApi';
 
 import { createLeadTransfer } from '../api/usersApi';
 import { useAuth } from '../context/AuthContext';
@@ -30,49 +30,64 @@ const ALL_STATUSES = [
 ];
 
 // ── AI Insights Section ──────────────────────────────────────────────
-function AIInsightsSection({ leadId }) {
+function AIInsightsSection({ leadId, lastInteractionTime }) {
   const [score, setScore]   = useState(null);
   const [timing, setTiming] = useState(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
 
-  const loadInsights = async () => {
+  const fetchOrGenerateInsights = async (forceGenerate = false) => {
     try {
-      const [s, t] = await Promise.all([
-        getLeadAIScore(leadId).catch((e) => e.response?.status === 404 ? null : Promise.reject(e)),
-        getLeadAIContactTiming(leadId).catch(() => null),
-      ]);
+      let s = null;
+      let t = null;
+
+      if (!forceGenerate) {
+        s = await getLeadAIScore(leadId).catch((e) => e.response?.status === 404 ? null : Promise.reject(e));
+        t = await getLeadAIContactTiming(leadId).catch(() => null);
+      }
+
+      // If no score exists yet, or forceGenerate is true, trigger generation automatically (sequentially to avoid 429 rate limits)
+      if (!s || forceGenerate) {
+        setGenerating(true);
+        const genS = await triggerLeadAIScore(leadId).catch(() => null);
+        const genT = await triggerLeadAIContactTiming(leadId).catch(() => null);
+        if (genS) s = genS;
+        if (genT) t = genT;
+      }
+
       setScore(s);
       setTiming(t);
     } catch {
       // silently ignore
     } finally {
       setLoading(false);
-    }
-  };
-
-  useEffect(() => { loadInsights(); }, [leadId]);
-
-  const handleGenerate = async () => {
-    setGenerating(true);
-    try {
-      const s = await triggerLeadAIScore(leadId);
-      setScore(s);
-      toast.success('AI score generated!');
-    } catch {
-      toast.error('AI generation failed');
-    } finally {
       setGenerating(false);
     }
   };
 
-  if (loading) return <div style={{ padding: 20, color: 'var(--text-muted)' }}>Fetching AI insights…</div>;
+  useEffect(() => {
+    fetchOrGenerateInsights(false);
+  }, [leadId]);
+
+  useEffect(() => {
+    if (!lastInteractionTime) return;
+    fetchOrGenerateInsights(true);
+  }, [lastInteractionTime]);
+
+  if (loading || generating) return (
+    <div style={{ padding: 20, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div className="spinner spinner-sm" />
+      <span>{generating ? 'Generating AI insights…' : 'Fetching AI insights…'}</span>
+    </div>
+  );
 
   const labelColors = { hot: '#ef4444', warm: '#f59e0b', cold: '#3b82f6' };
 
   return (
     <div>
-      <h3 style={{ marginBottom: 14, fontSize: '1rem' }}>AI Insights</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <h3 style={{ margin: 0, fontSize: '1rem' }}>AI Insights</h3>
+      </div>
 
       {score ? (
         <div className="ai-card" style={{ borderLeftColor: labelColors[score.label?.toLowerCase()] || 'var(--primary)' }}>
@@ -95,19 +110,13 @@ function AIInsightsSection({ leadId }) {
           )}
         </div>
       ) : (
-        <div style={{ marginBottom: 12 }}>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: 10 }}>
-            No AI score yet. Click to generate insights based on this lead's history.
-          </p>
-          <button className="btn btn-primary btn-sm" onClick={handleGenerate} disabled={generating} id="generate-ai-score-btn">
-            {generating ? '⏳ Generating…' : '⚡ Generate AI Score'}
-          </button>
-        </div>
-
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: 12 }}>
+          No AI insights available yet.
+        </p>
       )}
 
       {timing?.has_sufficient_data ? (
-        <div className="ai-card">
+        <div className="ai-card" style={{ marginTop: 12 }}>
           <div className="ai-card-header">
             <span className="ai-card-title">Best Time to Contact</span>
             <span className="badge badge-manager">Confidence: {(timing.confidence || 'medium').toUpperCase()}</span>
@@ -119,7 +128,7 @@ function AIInsightsSection({ leadId }) {
           {timing.reasoning && <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 6, fontStyle: 'italic' }}>{timing.reasoning}</p>}
         </div>
       ) : timing ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>{timing.reasoning}</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 12 }}>{timing.reasoning}</p>
       ) : null}
     </div>
   );
@@ -136,6 +145,11 @@ export default function LeadDetailsPage() {
   const [loading, setLoading]     = useState(true);
   const [note, setNote]           = useState('');
   const [addingNote, setAddingNote] = useState(false);
+  const [lastInteractionTime, setLastInteractionTime] = useState(null);
+
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editingNoteText, setEditingNoteText] = useState('');
+  const [savingNoteId, setSavingNoteId] = useState(null);
 
   const [newStatus, setNewStatus]       = useState('');
   const [newLastContact, setNewLastContact] = useState('');
@@ -197,12 +211,30 @@ export default function LeadDetailsPage() {
       await addTimelineNote(id, { event_type: 'note', event_metadata: { note: note.trim() } });
       setNote('');
       toast.success('Note added!');
+      setLastInteractionTime(Date.now());
       const t = await getLeadTimeline(id);
       setTimeline(t);
     } catch {
       toast.error('Failed to add note');
     } finally {
       setAddingNote(false);
+    }
+  };
+
+  const handleEditNoteSubmit = async (entryId) => {
+    if (!editingNoteText.trim()) return;
+    setSavingNoteId(entryId);
+    try {
+      await updateTimelineNote(id, entryId, { note: editingNoteText.trim() });
+      toast.success('Note updated!');
+      setEditingNoteId(null);
+      setLastInteractionTime(Date.now());
+      const t = await getLeadTimeline(id);
+      setTimeline(t);
+    } catch (err) {
+      toast.error('Failed to update note');
+    } finally {
+      setSavingNoteId(null);
     }
   };
 
@@ -439,6 +471,9 @@ export default function LeadDetailsPage() {
                 <div className="timeline">
                   {timeline.map((entry) => {
                     const style = EVENT_STYLES[entry.event_type] || { border: '#999', bg: 'rgba(100,116,139,0.07)', icon: '•' };
+                    const isNote = entry.event_type === 'note';
+                    const canEdit = isNote && canUpdate && (entry.user_id === user?.id || isManagerOrAdmin);
+
                     return (
                       <div key={entry.id} className="timeline-entry" style={{ borderLeftColor: style.border, background: style.bg }}>
                         <div className="timeline-entry-header">
@@ -447,11 +482,56 @@ export default function LeadDetailsPage() {
                           </span>
                           <span className="timeline-ts">{entry.created_at?.slice(0,16).replace('T',' ')}</span>
                         </div>
-                        <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                          {formatTimelineBody(entry)}
-                        </div>
-                        {entry.created_by_name && (
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>by {entry.created_by_name}</div>
+                        
+                        {editingNoteId === entry.id ? (
+                          <div style={{ marginTop: 8 }}>
+                            <textarea
+                              className="form-textarea"
+                              value={editingNoteText}
+                              onChange={(e) => setEditingNoteText(e.target.value)}
+                              style={{ minHeight: '60px', marginBottom: '8px' }}
+                            />
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button 
+                                className="btn btn-primary btn-sm" 
+                                onClick={() => handleEditNoteSubmit(entry.id)}
+                                disabled={savingNoteId === entry.id}
+                              >
+                                {savingNoteId === entry.id ? 'Saving...' : 'Save'}
+                              </button>
+                              <button 
+                                className="btn btn-ghost btn-sm" 
+                                onClick={() => setEditingNoteId(null)}
+                                disabled={savingNoteId === entry.id}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                              {formatTimelineBody(entry)}
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                {entry.user_name ? `by ${entry.user_name}` : (entry.event_metadata?.added_by || entry.event_metadata?.created_by ? `by ${entry.event_metadata.added_by || entry.event_metadata.created_by}` : '')}
+                                {entry.event_metadata?.edited_at && ' (edited)'}
+                              </div>
+                              {canEdit && (
+                                <button 
+                                  className="btn btn-ghost btn-sm" 
+                                  style={{ padding: '2px 6px', height: 'auto', fontSize: '0.75rem' }}
+                                  onClick={() => {
+                                    setEditingNoteId(entry.id);
+                                    setEditingNoteText(entry.event_metadata?.note || '');
+                                  }}
+                                >
+                                  <Edit size={12} style={{ marginRight: 4 }} /> Edit
+                                </button>
+                              )}
+                            </div>
+                          </>
                         )}
                       </div>
                     );
@@ -463,7 +543,7 @@ export default function LeadDetailsPage() {
 
           {/* Right — AI Insights */}
           <div className="glass-card" style={{ padding: 20 }}>
-            <AIInsightsSection leadId={id} />
+            <AIInsightsSection leadId={id} lastInteractionTime={lastInteractionTime} />
           </div>
         </div>
       </div>

@@ -17,7 +17,7 @@ class AISettings(BaseSettings):
 
     # Model & generation params
     AI_MODEL_NAME: str = "gemini-2.0-flash"
-    AI_REPORT_MODEL_NAME: str = "gemini-2.0-pro-exp"
+    AI_REPORT_MODEL_NAME: str = "gemini-2.0-flash"
     AI_TEMPERATURE: float = 0.2          # Low temperature → more deterministic scoring
     AI_MAX_OUTPUT_TOKENS: int = 2048
 

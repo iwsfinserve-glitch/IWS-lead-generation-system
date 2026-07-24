@@ -15,5 +15,12 @@ export const triggerLeadAIScore = (leadId) =>
 export const getLeadAIContactTiming = (leadId) =>
   api.get(`/leads/${leadId}/ai/contact-timing`).then((r) => r.data);
 
+export const triggerLeadAIContactTiming = (leadId) =>
+  api.post(`/leads/${leadId}/ai/contact-timing`).then((r) => r.data);
+
 export const getLeadAIClassification = (leadId) =>
   api.get(`/leads/${leadId}/ai/classification`).then((r) => r.data);
+
+export const triggerLeadAIClassification = (leadId) =>
+  api.post(`/leads/${leadId}/ai/client-classification`).then((r) => r.data);
+

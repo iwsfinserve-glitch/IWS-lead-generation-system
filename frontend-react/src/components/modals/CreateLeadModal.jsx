@@ -12,8 +12,9 @@ export default function CreateLeadModal({ onClose, onCreated }) {
   const [reps, setReps]       = useState([]);
   const [form, setForm] = useState({
     name: '', email: '', phone_number: '', profession: '',
-    address: '', dob: '', source_id: '', assigned_rep_id: '', notes: '',
+    address: '', dob: '', source_id: '', assigned_rep_id: '', note: '',
   });
+
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -100,8 +101,8 @@ export default function CreateLeadModal({ onClose, onCreated }) {
           </div>
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
             <label className="form-label">Initial Notes</label>
-            <textarea className="form-textarea" placeholder="Any initial notes…" value={form.notes}
-              onChange={(e) => set('notes', e.target.value)} id="create-lead-notes" />
+            <textarea className="form-textarea" placeholder="Any initial notes…" value={form.note}
+              onChange={(e) => set('note', e.target.value)} id="create-lead-notes" />
           </div>
         </div>
         <div className="modal-footer">

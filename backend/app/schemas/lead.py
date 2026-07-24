@@ -138,6 +138,11 @@ class LeadTimelineCreate(BaseModel):
     event_metadata: dict = Field(default_factory=dict)
 
 
+class LeadTimelineUpdate(BaseModel):
+    """For editing an existing timeline note."""
+    note: str = Field(..., min_length=1)
+
+
 class LeadTimelineRead(BaseModel):
     id: int
     lead_id: int
