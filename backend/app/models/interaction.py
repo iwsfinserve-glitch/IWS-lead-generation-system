@@ -168,6 +168,12 @@ class Task(Base):
         nullable=False,
     )
     due: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    end_time_notified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False,
+    )
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True,
     )

@@ -24,6 +24,7 @@ async def _create_task_record(
     title: str,
     notes: str | None,
     due: datetime | None,
+    end_time: datetime | None,
     background_tasks: BackgroundTasks,
     db: AsyncSession,
     current_user: User,
@@ -35,6 +36,7 @@ async def _create_task_record(
         title=title,
         notes=notes,
         due=due,
+        end_time=end_time,
     )
     db.add(task)
     await db.commit()
@@ -91,6 +93,7 @@ async def create_task(
         title=payload.title,
         notes=payload.notes,
         due=payload.due,
+        end_time=payload.end_time,
         background_tasks=background_tasks,
         db=db,
         current_user=current_user,
@@ -111,6 +114,7 @@ async def create_self_task(
         title=payload.title,
         notes=payload.notes,
         due=payload.due,
+        end_time=payload.end_time,
         background_tasks=background_tasks,
         db=db,
         current_user=current_user,
@@ -133,14 +137,14 @@ async def update_task(
     if current_user.is_sales_rep and task.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can only edit your own tasks")
 
-    # Reps cannot change due date on tasks assigned by someone else
+    # Reps cannot change due date or end time on tasks assigned by someone else
     if (current_user.is_sales_rep
-            and "due" in payload.model_dump(exclude_unset=True)
+            and ("due" in payload.model_dump(exclude_unset=True) or "end_time" in payload.model_dump(exclude_unset=True))
             and task.assigned_by is not None
             and task.assigned_by != current_user.id):
         raise HTTPException(
             status_code=403,
-            detail="You cannot change the due date on a manager-assigned task. "
+            detail="You cannot change the due date or end time on a manager-assigned task. "
                    "Please submit a due date change request instead.",
         )
 

@@ -18,6 +18,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.db.session import async_session_factory
 from app.services.rollover import run_monthly_rollover
 from app.services.appointment_status import reconcile_appointment_statuses
+from app.services.task_status import reconcile_task_statuses
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,17 @@ async def _reconcile_appointments_job() -> None:
             logger.info("Scheduler: appointment reconcile completed.")
         except Exception:
             logger.exception("Scheduler: appointment reconcile job failed!")
+
+
+async def _reconcile_tasks_job() -> None:
+    """Wrapper invoked by the scheduler — creates its own DB session."""
+    logger.info("Scheduler: running task status reconcile...")
+    async with async_session_factory() as db:
+        try:
+            await reconcile_task_statuses(db)
+            logger.info("Scheduler: task reconcile completed.")
+        except Exception:
+            logger.exception("Scheduler: task reconcile job failed!")
 
 
 def setup_scheduler() -> None:
@@ -75,3 +87,11 @@ def setup_scheduler() -> None:
         f"Scheduler: registered appointment_reconcile job "
         f"(every {interval_hours}h, runs immediately on startup)."
     )
+
+    scheduler.add_job(
+        _reconcile_tasks_job,
+        IntervalTrigger(minutes=15),
+        id="task_reconcile",
+        replace_existing=True,
+    )
+    logger.info("Scheduler: registered task_reconcile job (every 15m).")
