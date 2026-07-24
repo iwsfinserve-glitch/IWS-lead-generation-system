@@ -1,10 +1,10 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/layout/Navbar';
 import MetricCard from '../components/common/MetricCard';
 import { RoleBadge } from '../components/common/StatusBadge';
 import { getUsers } from '../api/usersApi';
-import { getLeads } from '../api/leadsApi';
+import { getLeads, getLeadsSummary } from '../api/leadsApi';
 import { Users, Target, TrendingUp, CheckSquare, ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';

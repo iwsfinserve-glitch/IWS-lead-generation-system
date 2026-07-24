@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Edit, Trash2 } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import { getUser, deleteUser } from '../api/usersApi';
-import { getLeads } from '../api/leadsApi';
+import { getLeads, getLeadsSummary } from '../api/leadsApi';
 import { getTasks } from '../api/tasksApi';
 import { getAppointments } from '../api/appointmentsApi';
 import { RoleBadge } from '../components/common/StatusBadge';
@@ -18,6 +18,7 @@ export default function UserDetailsPage() {
   const { user: currentUser, isAdmin } = useAuth();
   const [user, setUser]         = useState(null);
   const [leads, setLeads]       = useState([]);
+  const [leadSummary, setLeadSummary] = useState({});
   const [tasks, setTasks]       = useState([]);
   const [appts, setAppts]       = useState([]);
   const [loading, setLoading]   = useState(true);
@@ -28,14 +29,16 @@ export default function UserDetailsPage() {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [u, l, t, a] = await Promise.all([
+      const [u, l, ls, t, a] = await Promise.all([
         getUser(id),
         getLeads({ assigned_rep_id: id, limit: 200 }),
+        getLeadsSummary({ assigned_rep_id: id }).catch(() => ({})),
         getTasks({ assigned_to_id: id, limit: 200 }),
         getAppointments({ user_id: id }),
       ]);
       setUser(u);
       setLeads(l);
+      setLeadSummary(ls);
       setTasks(t);
       setAppts(a);
     } catch { toast.error('Failed to load user data'); }
@@ -70,7 +73,7 @@ export default function UserDetailsPage() {
   const doneTasks    = tasks.filter((t) => t.status === 'completed').length;
 
   const TABS = [
-    { key: 'leads',  label: `Leads (${leads.length})` },
+    { key: 'leads',  label: `Leads (${leadSummary.total || leads.length})` },
     { key: 'tasks',  label: `Tasks (${tasks.length})` },
     { key: 'appts',  label: `Appointments (${appts.length})` },
   ];
