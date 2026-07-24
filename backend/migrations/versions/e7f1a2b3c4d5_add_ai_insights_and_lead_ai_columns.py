@@ -27,37 +27,40 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # ── 1. Create lead_ai_insights table ────────────────────────────────
-    op.create_table(
-        "lead_ai_insights",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column(
-            "lead_id",
-            sa.Integer(),
-            sa.ForeignKey("leads.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("insight_type", sa.String(length=50), nullable=False),
-        # Use JSONB on PostgreSQL for efficient indexing; plain JSON on SQLite (tests)
-        sa.Column(
-            "payload",
-            postgresql.JSONB().with_variant(sa.JSON(), "sqlite"),
-            nullable=False,
-            server_default="{}",
-        ),
-        sa.Column("score", sa.Float(), nullable=True),
-        sa.Column("confidence", sa.Float(), nullable=True),
-        sa.Column("model_used", sa.String(length=100), nullable=False),
-        sa.Column(
-            "generated_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-        ),
-    )
-    op.create_index(
-        "ix_lead_ai_insights_lead_id",
-        "lead_ai_insights",
-        ["lead_id"],
-    )
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    if "lead_ai_insights" not in inspector.get_table_names():
+        op.create_table(
+            "lead_ai_insights",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column(
+                "lead_id",
+                sa.Integer(),
+                sa.ForeignKey("leads.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column("insight_type", sa.String(length=50), nullable=False),
+            # Use JSONB on PostgreSQL for efficient indexing; plain JSON on SQLite (tests)
+            sa.Column(
+                "payload",
+                postgresql.JSONB().with_variant(sa.JSON(), "sqlite"),
+                nullable=False,
+                server_default="{}",
+            ),
+            sa.Column("score", sa.Float(), nullable=True),
+            sa.Column("confidence", sa.Float(), nullable=True),
+            sa.Column("model_used", sa.String(length=100), nullable=False),
+            sa.Column(
+                "generated_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+            ),
+        )
+        op.create_index(
+            "ix_lead_ai_insights_lead_id",
+            "lead_ai_insights",
+            ["lead_id"],
+        )
 
     # ── 2. Add denormalized AI columns to leads ──────────────────────────
     op.execute("ALTER TABLE leads ADD COLUMN IF NOT EXISTS ai_score DOUBLE PRECISION;")
