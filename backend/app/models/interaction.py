@@ -122,6 +122,14 @@ class Appointment(Base):
     manager_alerted: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false",
     )
+    # Timestamp of when the manager was alerted — used for the 2-day admin escalation threshold
+    manager_alerted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    # Idempotency flag — prevents re-notifying the admin on every reconcile run
+    admin_alerted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false",
+    )
 
     # Composite index used by the hourly reconcile query
     __table_args__ = (Index("ix_appointments_status_end_time", "status", "end_time"),)
@@ -172,6 +180,17 @@ class Task(Base):
         DateTime(timezone=True), nullable=True,
     )
     end_time_notified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False,
+    )
+    # Escalation tier 2: manager notification tracking
+    manager_alerted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False,
+    )
+    manager_alerted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    # Escalation tier 3: admin notification tracking
+    admin_alerted: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false", default=False,
     )
     completed_at: Mapped[datetime | None] = mapped_column(
