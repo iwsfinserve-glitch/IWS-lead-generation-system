@@ -21,7 +21,15 @@ export const getGoogleStatus = () =>
 
 export const getGoogleConnectUrl = async () => {
   const token = localStorage.getItem('access_token');
-  return `/api/v1/auth/google/connect?token=${token}`;
+  // Ensure we use the absolute backend URL so the browser navigates directly to the backend
+  // instead of the frontend React router catching the route and redirecting to the dashboard.
+  const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').trim();
+  let normalizedBaseUrl = rawBaseUrl;
+  if (normalizedBaseUrl && !normalizedBaseUrl.startsWith('http://') && !normalizedBaseUrl.startsWith('https://')) {
+    normalizedBaseUrl = `https://${normalizedBaseUrl}`;
+  }
+  const prefix = normalizedBaseUrl ? `${normalizedBaseUrl.replace(/\/+$/, '')}/api/v1` : '/api/v1';
+  return `${prefix}/auth/google/connect?token=${token}`;
 };
 
 export const googleDisconnect = () =>
