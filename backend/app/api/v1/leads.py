@@ -96,16 +96,20 @@ async def list_leads(
 
 @router.get("/summary")
 async def get_leads_summary(
+    assigned_rep_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Return optimized status counts without loading full lead objects."""
-    result = await db.execute(
-        select(
-            Lead.status,
-            func.count(Lead.id).label("count"),
-        ).group_by(Lead.status)
+    query = select(
+        Lead.status,
+        func.count(Lead.id).label("count"),
     )
+    if assigned_rep_id:
+        query = query.where(Lead.assigned_rep_id == assigned_rep_id)
+    query = query.group_by(Lead.status)
+
+    result = await db.execute(query)
     counts = {row.status.value: row.count for row in result.all()}
 
     total = sum(counts.values())
