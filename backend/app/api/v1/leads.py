@@ -6,7 +6,12 @@ Additional routes (SEO workflow):
     PATCH /{lead_id}/claim       — atomic race-condition-safe lead claiming
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Query, status, BackgroundTasks
+import csv
+import io
+import openpyxl
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, status, BackgroundTasks, UploadFile, File
 from sqlalchemy import select, or_, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +22,11 @@ from app.schemas.lead import (
     LeadCreate, LeadRead, LeadUpdate,
     LeadTimelineCreate, LeadTimelineRead,
     WebLeadCreate,
+)
+from app.schemas.bulk_lead import (
+    BulkAssignPayload, BulkAssignResponse,
+    BulkImportResponse,
+    BulkDeletePayload, BulkDeleteResponse
 )
 from app.api.dependencies import get_current_user, require_roles
 from app.services.ai_sync import trigger_ai_analysis_background
@@ -460,4 +470,206 @@ async def claim_lead(
     await db.commit()
     await db.refresh(lead)
     return LeadRead.from_orm_lead(lead)
+
+@router.post("/bulk-import", response_model=BulkImportResponse)
+async def bulk_import_leads(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles("admin", "manager")),
+):
+    """Bulk import leads from CSV or Excel file."""
+    content = await file.read()
+    filename = file.filename.lower()
+    
+    rows = []
+    if filename.endswith(".csv"):
+        text = content.decode("utf-8-sig")
+        reader = csv.DictReader(io.StringIO(text))
+        rows = list(reader)
+    elif filename.endswith(".xlsx") or filename.endswith(".xls"):
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        sheet = wb.active
+        headers = [cell.value for cell in sheet[1]]
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            if any(row):
+                rows.append(dict(zip(headers, row)))
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file format. Please upload CSV or Excel.")
+
+    imported_count = 0
+    skipped_count = 0
+    errors = []
+
+    for i, row in enumerate(rows, start=2):
+        try:
+            data = {str(k).strip().lower(): v for k, v in row.items() if k}
+            name = data.get("name")
+            if not name:
+                skipped_count += 1
+                errors.append(f"Row {i}: Missing required field 'name'")
+                continue
+            
+            dob_val = data.get("dob")
+            parsed_dob = None
+            if dob_val:
+                if isinstance(dob_val, datetime):
+                    parsed_dob = dob_val.date()
+                else:
+                    try:
+                        parsed_dob = datetime.strptime(str(dob_val).strip(), "%Y-%m-%d").date()
+                    except ValueError:
+                        pass # Ignore invalid format for now
+
+            source_id = None
+            source_name = data.get("source")
+            if source_name:
+                src_res = await db.execute(select(LeadSource).where(LeadSource.name.ilike(source_name.strip())))
+                src = src_res.scalar_one_or_none()
+                if not src:
+                    src = LeadSource(name=source_name.strip(), priority="medium")
+                    db.add(src)
+                    await db.flush()
+                source_id = src.id
+
+            lead = Lead(
+                name=str(name).strip(),
+                email=str(data.get("email", "")).strip() or None,
+                phone_number=str(data.get("phone", data.get("phone no", data.get("phone_number", "")))).strip() or None,
+                profession=str(data.get("profession", "")).strip() or None,
+                address=str(data.get("address", "")).strip() or None,
+                dob=parsed_dob,
+                source_id=source_id,
+                status=LeadStatus.unassigned,
+                assigned_rep_id=None,
+            )
+            db.add(lead)
+            await db.flush()
+            
+            db.add(LeadTimeline(
+                lead_id=lead.id,
+                user_id=current_user.id,
+                event_type="lead_created",
+                event_metadata={"method": "bulk_import", "created_by": current_user.name, "filename": filename},
+            ))
+            background_tasks.add_task(trigger_ai_analysis_background, lead.id)
+            imported_count += 1
+        except Exception as e:
+            skipped_count += 1
+            errors.append(f"Row {i}: {str(e)}")
+
+    await db.commit()
+    return BulkImportResponse(imported_count=imported_count, skipped_count=skipped_count, errors=errors)
+
+
+@router.post("/bulk-assign", response_model=BulkAssignResponse)
+async def bulk_assign_leads(
+    payload: BulkAssignPayload,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles("admin", "manager")),
+):
+    """Bulk assign leads to a sales rep. Optionally transfer existing assignments."""
+    assigned_count = 0
+    transferred_count = 0
+    skipped_count = 0
+
+    target_rep_res = await db.execute(select(User).where(User.id == payload.assigned_rep_id, User.role == "sales_rep"))
+    target_rep = target_rep_res.scalar_one_or_none()
+    if not target_rep:
+        raise HTTPException(status_code=400, detail="Target user is not a valid sales representative.")
+
+    for lead_id in payload.lead_ids:
+        lead = await _get_lead_or_404(lead_id, db)
+        
+        if lead.assigned_rep_id == payload.assigned_rep_id:
+            skipped_count += 1
+            continue
+
+        if lead.assigned_rep_id is not None:
+            if not payload.overwrite_existing:
+                skipped_count += 1
+                continue
+            
+            old_rep_id = lead.assigned_rep_id
+            lead.assigned_rep_id = target_rep.id
+            db.add(LeadTimeline(
+                lead_id=lead.id,
+                user_id=current_user.id,
+                event_type="lead_transferred",
+                event_metadata={
+                    "old_rep_id": old_rep_id,
+                    "new_rep_id": target_rep.id,
+                    "assigned_to": target_rep.name,
+                    "method": "bulk_assign",
+                    "changed_by": current_user.name,
+                },
+            ))
+            transferred_count += 1
+        else:
+            lead.assigned_rep_id = target_rep.id
+            old_status = lead.status
+            if lead.status == LeadStatus.unassigned:
+                lead.status = LeadStatus.in_progress
+                db.add(LeadTimeline(
+                    lead_id=lead.id,
+                    user_id=current_user.id,
+                    event_type="status_change",
+                    event_metadata={
+                        "old_status": old_status.value if old_status else None,
+                        "new_status": LeadStatus.in_progress.value,
+                        "changed_by": current_user.name,
+                    },
+                ))
+            
+            db.add(LeadTimeline(
+                lead_id=lead.id,
+                user_id=current_user.id,
+                event_type="lead_assigned",
+                event_metadata={
+                    "assigned_to": target_rep.name,
+                    "assigned_to_id": target_rep.id,
+                    "method": "bulk_assign",
+                    "changed_by": current_user.name,
+                },
+            ))
+            assigned_count += 1
+            
+        background_tasks.add_task(trigger_ai_analysis_background, lead.id)
+
+    await db.commit()
+    
+    if assigned_count + transferred_count > 0:
+        await notify_sales_reps_and_managers(
+            db,
+            title="Bulk Leads Assigned",
+            message=f"{assigned_count + transferred_count} leads have been assigned to you by {current_user.name}.",
+            notification_type="Leads",
+            link_type="leads",
+            link_id=0,
+            target_user_id=target_rep.id
+        )
+
+    return BulkAssignResponse(
+        assigned_count=assigned_count,
+        transferred_count=transferred_count,
+        skipped_count=skipped_count
+    )
+
+@router.post("/bulk-delete", response_model=BulkDeleteResponse)
+async def bulk_delete_leads(
+    payload: BulkDeletePayload,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles("admin")),
+):
+    """Bulk delete leads. Admin only."""
+    deleted_count = 0
+    for lead_id in payload.lead_ids:
+        lead = await _get_lead_or_404(lead_id, db)
+        await db.delete(lead)
+        deleted_count += 1
+    
+    await db.commit()
+    return BulkDeleteResponse(deleted_count=deleted_count)
+
 

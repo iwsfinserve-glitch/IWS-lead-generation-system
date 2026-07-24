@@ -38,6 +38,7 @@ class LeadCreate(BaseModel):
     email: str = Field(..., min_length=1, max_length=255)
     phone_number: str = Field(..., min_length=1, max_length=50)
     address: str | None = None
+    dob: date | None = None
     source_id: int | None = None
     assigned_rep_id: int | None = None
     note: str | None = None
@@ -54,6 +55,7 @@ class WebLeadCreate(BaseModel):
     phone_number: str = Field(..., min_length=1, max_length=50)
     profession: str = Field(..., min_length=1, max_length=255)
     address: str | None = None
+    dob: date | None = None
     message: str | None = None   # The inquiry/message field from the contact form
 
 
@@ -64,6 +66,8 @@ class LeadRead(BaseModel):
     email: str | None
     phone_number: str | None
     address: str | None
+    dob: date | None = None
+    age: int | None = None
     status: LeadStatus
     last_contact: date | None
     source_id: int | None
@@ -93,6 +97,8 @@ class LeadRead(BaseModel):
             email=lead.email,
             phone_number=lead.phone_number,
             address=lead.address,
+            dob=lead.dob,
+            age=lead.age,
             status=lead.status,
             last_contact=lead.last_contact,
             source_id=lead.source_id,
@@ -117,6 +123,7 @@ class LeadUpdate(BaseModel):
     email: str | None = None
     phone_number: str | None = None
     address: str | None = None
+    dob: date | None = None
     status: LeadStatus | None = None
     last_contact: date | None = None
     source_id: int | None = None

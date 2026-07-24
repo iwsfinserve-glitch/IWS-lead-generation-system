@@ -25,7 +25,7 @@ import asyncio
 import logging
 import time
 from functools import lru_cache
-from typing import TypeVar
+from typing import TypeVar, Any
 
 from pydantic import BaseModel, ValidationError
 from google import genai
@@ -96,33 +96,39 @@ class AIClient:
         )
 
     async def _sdk_call(
-        self, prompt: str, gen_config: types.GenerateContentConfig
+        self, prompt: str, gen_config: types.GenerateContentConfig, retries: int = 2, model_name: str | None = None
     ):
-        """Single SDK call via asyncio.to_thread. Raises AIServiceError on failure."""
-        try:
-            return await asyncio.to_thread(
-                self._sdk.models.generate_content,
-                model=self._config.AI_MODEL_NAME,
-                contents=prompt,
-                config=gen_config,
-            )
-        except Exception as exc:
-            if _is_rate_limit_error(exc):
-                raise AIRateLimitError(f"Gemini rate limit: {exc}") from exc
-            raise AIServiceError(f"Gemini SDK call failed: {exc}") from exc
+        """Single SDK call via asyncio.to_thread. Handles rate limits with backoff. Raises AIServiceError on failure."""
+        import asyncio
+        for attempt in range(retries + 1):
+            try:
+                return await asyncio.to_thread(
+                    self._sdk.models.generate_content,
+                    model=model_name or self._config.AI_MODEL_NAME,
+                    contents=prompt,
+                    config=gen_config,
+                )
+            except Exception as exc:
+                if _is_rate_limit_error(exc):
+                    if attempt < retries:
+                        # Gemini free tier RPM limit backoff (usually 15 RPM, wait 26-30s)
+                        await asyncio.sleep(26 + attempt * 2)
+                        continue
+                    raise AIRateLimitError(f"Gemini rate limit exceeded after retries: {exc}") from exc
+                raise AIServiceError(f"Gemini SDK call failed: {exc}") from exc
 
     # ── Public API ──────────────────────────────────────────────────────
 
     async def generate(
         self,
-        *,
         prompt: str,
-        response_schema: type[T],
+        response_schema: type[T] | None = None,
         temperature: float | None = None,
-        feature_name: str = "",
+        feature_name: str = "unknown",
         entity_id: int | str = "",
         plain_text: bool = False,
-    ) -> T:
+        model_name: str | None = None,
+    ) -> Any:
         """Call Gemini and return a validated Pydantic model instance.
 
         Args:
@@ -154,7 +160,7 @@ class AIClient:
 
         for attempt in range(self._config.AI_MAX_RETRIES + 1):
             try:
-                response = await self._sdk_call(prompt, gen_config)
+                response = await self._sdk_call(prompt, gen_config, model_name=model_name)
                 break  # Success — exit retry loop
             except AIRateLimitError:
                 # Rate limits are not transient in the normal sense — surface immediately

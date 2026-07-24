@@ -25,6 +25,7 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from app.ai.client import get_ai_client
+from app.ai.config import ai_settings
 from app.ai.features.report_generation import (
     LeadJourneyFeature,
     PeriodicLeadsReportFeature,
@@ -54,6 +55,7 @@ async def generate_lead_journey_report(timeline_data: list[dict], lead_name: str
         result = await feature.run(
             {"timeline_data": timeline_data, "lead_name": lead_name},
             entity_id="lead_journey",
+            model_name=ai_settings.AI_REPORT_MODEL_NAME,
         )
         return result.text
     except AIServiceError as exc:
@@ -75,6 +77,7 @@ async def generate_periodic_leads_report(
         result = await feature.run(
             {"summary": summary, "period_label": period_label, "target_name": target_name},
             entity_id="periodic_leads",
+            model_name=ai_settings.AI_REPORT_MODEL_NAME,
         )
         return result.text
     except AIServiceError as exc:
@@ -102,6 +105,7 @@ async def generate_user_performance_report(
                 "user_role": user_role,
             },
             entity_id="user_performance",
+            model_name=ai_settings.AI_REPORT_MODEL_NAME,
         )
         return result.text
     except AIServiceError as exc:
@@ -119,6 +123,7 @@ async def generate_team_performance_report(metrics: dict) -> str:
         result = await feature.run(
             {"metrics": metrics},
             entity_id="team_performance",
+            model_name=ai_settings.AI_REPORT_MODEL_NAME,
         )
         return result.text
     except AIServiceError as exc:

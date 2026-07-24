@@ -104,7 +104,7 @@ async def notify_sales_reps_and_managers(
     from app.db.base import User
 
     result = await db.execute(
-        select(User).where(User.role.in_([UserRole.sales_rep, UserRole.manager]))
+        select(User).where(User.role.in_([UserRole.sales_rep, UserRole.manager, UserRole.admin]))
     )
     recipients = result.scalars().all()
 

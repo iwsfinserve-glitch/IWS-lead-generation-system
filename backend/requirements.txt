@@ -35,3 +35,6 @@ slowapi
 
 # ── Background Scheduler ──
 apscheduler
+
+# ── File Parsing ──
+openpyxl

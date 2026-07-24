@@ -70,12 +70,20 @@ async def create_task(
     payload: TaskCreate,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_roles("admin", "manager")),
+    current_user: User = Depends(get_current_user),
 ):
-    """Create a task and assign it to a user. Admin/Manager only."""
+    """Create a task and assign it to a user."""
+    if current_user.is_sales_rep and payload.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Sales reps can only create tasks for themselves")
+
     target = await db.execute(select(User).where(User.id == payload.user_id))
-    if not target.scalar_one_or_none():
+    target_user = target.scalar_one_or_none()
+    if not target_user:
         raise HTTPException(status_code=404, detail="Assigned user not found")
+
+    if current_user.is_manager_or_above and not current_user.is_admin:
+        if payload.user_id != current_user.id and target_user.manager_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Managers can only assign tasks to their direct reports")
 
     return await _create_task_record(
         user_id=payload.user_id,

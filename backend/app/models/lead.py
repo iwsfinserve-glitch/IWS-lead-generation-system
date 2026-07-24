@@ -64,6 +64,15 @@ class Lead(Base):
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dob: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    @property
+    def age(self) -> int | None:
+        """Calculate age from DOB."""
+        if not self.dob:
+            return None
+        today = date.today()
+        return today.year - self.dob.year - ((today.month, today.day) < (self.dob.month, self.dob.day))
 
     status: Mapped[LeadStatus] = mapped_column(
         Enum(LeadStatus, name="lead_status", create_constraint=True),

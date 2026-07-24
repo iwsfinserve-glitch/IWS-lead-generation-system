@@ -57,7 +57,7 @@ class BaseAIFeature(ABC, Generic[TContext, TResult]):
         """
         ...
 
-    async def run(self, context: TContext, entity_id: int | str = "") -> TResult:
+    async def run(self, context: TContext, entity_id: int | str = "", model_name: str | None = None) -> TResult:
         """Execute the AI feature end-to-end.
 
         Calls build_prompt → client.generate → returns validated result.
@@ -70,4 +70,5 @@ class BaseAIFeature(ABC, Generic[TContext, TResult]):
             response_schema=self.response_schema,
             feature_name=self.feature_name,
             entity_id=entity_id,
+            model_name=model_name,
         )

@@ -335,10 +335,10 @@ async def google_callback(
         # Redirect to frontend with an error flag and the error message URL-encoded.
         frontend_url = settings.GOOGLE_REDIRECT_URI.replace(
             "/api/v1/auth/google/callback", ""
-        ).replace("8000", "8501")
+        ).replace("8000", "5173")
         error_msg = urllib.parse.quote(str(e))
         return RedirectResponse(
-            url=f"{frontend_url}/Appointments?google_error=1&error_msg={error_msg}"
+            url=f"{frontend_url}/appointments?google_error=1&error_msg={error_msg}"
         )
 
     credentials = flow.credentials
@@ -375,9 +375,9 @@ async def google_callback(
     frontend_base = (
         settings.GOOGLE_REDIRECT_URI
         .split("/api/")[0]           # strip the path
-        .replace(":8000", ":8501")  # swap backend port for frontend port
+        .replace(":8000", ":5173")  # swap backend port for frontend React port
     )
-    redirect_target = f"{frontend_base}/Appointments?google_connected=1"
+    redirect_target = f"{frontend_base}/appointments?google_connected=1"
     return RedirectResponse(url=redirect_target, status_code=302)
 
 
