@@ -13,6 +13,7 @@ import TasksPage        from './pages/TasksPage';
 import ReportsPage      from './pages/ReportsPage';
 import UserDetailsPage  from './pages/UserDetailsPage';
 import UsersPage        from './pages/UsersPage';
+import MyTeamPage       from './pages/MyTeamPage';
 
 // Layout wrapper for authenticated pages
 function AppLayout() {
@@ -68,6 +69,11 @@ export default function App() {
               </ProtectedRoute>
             } />
             <Route path="/users/:id"        element={<UserDetailsPage />} />
+            <Route path="/my-team"          element={
+              <ProtectedRoute roles={['manager']}>
+                <MyTeamPage />
+              </ProtectedRoute>
+            } />
           </Route>
 
           {/* Default redirect */}

@@ -122,45 +122,130 @@ function SalesRepDashboard() {
 function ManagerDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [users, setUsers]   = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [leads, setLeads]           = useState([]);
+  const [appointments, setAppts]    = useState([]);
+  const [tasks, setTasks]           = useState([]);
+  const [teamSize, setTeamSize]     = useState(0);
+  const [loading, setLoading]       = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
 
   useEffect(() => {
-    getUsers()
-      .then((u) => setUsers(u.filter((x) => x.manager_id === user.id)))
-      .catch(() => toast.error('Failed to load team'))
+    Promise.all([
+      getLeads({ assigned_rep_id: user.id, limit: 100 }),
+      getAppointments(),
+      getTasks({ limit: 100 }),
+      getUsers().then((u) => u.filter((x) => x.manager_id === user.id).length),
+    ]).then(([l, a, t, ts]) => {
+      setLeads(l);
+      setAppts(a);
+      setTasks(t);
+      setTeamSize(ts);
+    }).catch(() => toast.error('Failed to load dashboard data'))
       .finally(() => setLoading(false));
   }, [user.id]);
+
+  const now = new Date().toISOString();
+  const upcoming  = appointments.filter((a) => a.start_time >= now).sort((a, b) => a.start_time.localeCompare(b.start_time)).slice(0, 5);
+  const pending   = tasks.filter((t) => t.status === 'needsAction').slice(0, 5);
+  const potential = leads.filter((l) => l.status === 'potential').length;
+  const converted = leads.filter((l) => l.status === 'converted_to_investor').length;
 
   if (loading) return <div className="loading-center"><div className="spinner" /> Loading...</div>;
 
   return (
     <>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}>
-        <MetricCard label="Direct Reports" value={users.length} icon={Users} />
+        <MetricCard label="My Leads"   value={leads.length}  icon={Target} />
+        <MetricCard label="Potential"  value={potential}     icon={TrendingUp} color="var(--accent)" />
+        <MetricCard label="Converted"  value={converted}     icon={CheckSquare} color="var(--success)" />
+        <MetricCard label="My Team"    value={teamSize}      icon={Users} color="var(--primary-light)"
+          onClick={() => navigate('/my-team')} style={{ cursor: 'pointer' }} />
       </div>
-      <h2 style={{ marginBottom: 16 }}>My Sales Team</h2>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
-        {users.map((u) => (
-          <div key={u.id} className="glass-card" style={{ padding: 18, cursor: 'pointer' }} onClick={() => navigate(`/users/${u.id}`)} id={`manager-user-card-${u.id}`}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-              <div style={{
-                width: 40, height: 40, borderRadius: '50%',
-                background: 'linear-gradient(135deg, var(--primary), var(--accent))',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontWeight: 700, color: '#fff',
-              }}>
-                {u.name.slice(0, 2).toUpperCase()}
-              </div>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{u.name}</div>
-                <RoleBadge role={u.role} />
+
+      {/* Quick link to My Team */}
+      <div
+        className="glass-card"
+        style={{
+          padding: '14px 20px', marginBottom: 24, display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', cursor: 'pointer',
+          background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.08))',
+          border: '1px solid rgba(99,102,241,0.2)',
+        }}
+        onClick={() => navigate('/my-team')}
+        id="dashboard-my-team-link"
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Users size={18} color="var(--primary)" />
+          <div>
+            <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>My Sales Team</div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+              View your {teamSize} direct report{teamSize !== 1 ? 's' : ''}, their leads and performance
+            </div>
+          </div>
+        </div>
+        <ChevronRight size={16} color="var(--text-muted)" />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 28 }}>
+        {/* Upcoming Appointments */}
+        <div className="glass-card" style={{ padding: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h3 style={{ margin: 0, fontSize: '1rem' }}>Upcoming Appointments</h3>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/appointments')} id="mgr-dashboard-appts-link">
+              View All <ChevronRight size={14} />
+            </button>
+          </div>
+          {upcoming.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>No upcoming appointments.</p>
+          ) : upcoming.map((a) => (
+            <div key={a.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{a.title}</div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                {new Date(a.start_time).toLocaleString()} · {a.lead_name}
               </div>
             </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{u.email}</div>
+          ))}
+        </div>
+
+        {/* Pending Tasks */}
+        <div className="glass-card" style={{ padding: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h3 style={{ margin: 0, fontSize: '1rem' }}>Pending Tasks</h3>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('/tasks')} id="mgr-dashboard-tasks-link">
+              View All <ChevronRight size={14} />
+            </button>
           </div>
-        ))}
+          {pending.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>No pending tasks. Great work!</p>
+          ) : pending.map((t) => (
+            <div key={t.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{t.title}</div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                Due: {t.end_time ? new Date(t.end_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : (t.due || 'No due date')} {t.lead_name ? `· ${t.lead_name}` : ''}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
+
+      {/* My Leads */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2 style={{ margin: 0 }}>My Leads</h2>
+        <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)} id="mgr-dashboard-create-lead-btn">
+          <Plus size={14} /> New Lead
+        </button>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {leads.slice(0, 10).map((l) => <LeadCard key={l.id} lead={l} />)}
+        {leads.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>No leads assigned to you yet.</p>}
+      </div>
+      {leads.length > 10 && (
+        <button className="btn btn-ghost btn-full" style={{ marginTop: 12 }} onClick={() => navigate('/leads')} id="mgr-dashboard-view-all-leads-btn">
+          View all {leads.length} leads
+        </button>
+      )}
+
+      {showCreate && <CreateLeadModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); window.location.reload(); }} />}
     </>
   );
 }

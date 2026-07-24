@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Users, Target, Calendar, CheckSquare,
+  LayoutDashboard, Users, Users2, Target, Calendar, CheckSquare,
   BarChart3, LogOut, ChevronRight, Zap,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -16,6 +16,10 @@ const navItems = [
 
 const adminItems = [
   { to: '/users', icon: Users, label: 'Users' },
+];
+
+const managerItems = [
+  { to: '/my-team', icon: Users2, label: 'My Team' },
 ];
 
 function getInitials(name = '') {
@@ -72,6 +76,17 @@ export default function Sidebar() {
           <>
             <div className="nav-section-label" style={{ marginTop: 8 }}>Administration</div>
             {adminItems.map(({ to, icon: Icon, label }) => (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+              >
+                <Icon size={16} className="nav-icon" />
+                {label}
+              </NavLink>
+            ))}
+            {/* My Team — managers only */}
+            {!isAdmin && managerItems.map(({ to, icon: Icon, label }) => (
               <NavLink
                 key={to}
                 to={to}
