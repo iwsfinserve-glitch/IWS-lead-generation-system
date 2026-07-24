@@ -67,7 +67,7 @@ export default function ManageUserModal({ user: existingUser, onClose, onSaved }
         </div>
         <div className="form-group">
           <label className="form-label">Email *</label>
-          <input className="form-input" type="email" placeholder="jane@iwsfinserve.com" value={form.email}
+          <input className="form-input" type="email" placeholder="jane@iwsfinserv.com" value={form.email}
             onChange={(e) => set('email', e.target.value)} id="user-email" />
         </div>
         <div className="form-group">
