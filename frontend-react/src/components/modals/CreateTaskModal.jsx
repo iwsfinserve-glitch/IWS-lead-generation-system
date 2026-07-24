@@ -30,7 +30,8 @@ export default function CreateTaskModal({ leadId, onClose, onCreated }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.title.trim() || !form.lead_id) { toast.error('Title and lead are required'); return; }
+    if (form.title.trim().length < 3) { toast.error('Task title must be at least 3 characters'); return; }
+    if (!form.lead_id) { toast.error('Lead is required'); return; }
     setSaving(true);
     try {
       const selectedLead = leads.find(l => l.id === parseInt(form.lead_id));

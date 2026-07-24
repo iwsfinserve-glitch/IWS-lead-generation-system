@@ -28,7 +28,8 @@ export default function ScheduleAppointmentModal({ leadId, onClose, onCreated })
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.title.trim() || !form.lead_id) { toast.error('Title and lead are required'); return; }
+    if (form.title.trim().length < 3) { toast.error('Appointment title must be at least 3 characters'); return; }
+    if (!form.lead_id) { toast.error('Lead is required'); return; }
 
     const start = new Date(`${form.date}T${form.start_time}`);
     let end     = new Date(`${form.date}T${form.end_time}`);

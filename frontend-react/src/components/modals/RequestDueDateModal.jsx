@@ -15,7 +15,8 @@ export default function RequestDueDateModal({ task, onClose, onRequested }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!newDue) { toast.error('New due date is required'); return; }
-    if (!canEditDirectly && !reason.trim()) { toast.error('Reason is required for extension requests'); return; }
+    if (new Date(newDue) < new Date(new Date().toDateString())) { toast.error('Due date cannot be in the past'); return; }
+    if (!canEditDirectly && reason.trim().length < 5) { toast.error('A detailed reason (min 5 chars) is required for extension requests'); return; }
     setSaving(true);
     try {
       if (canEditDirectly) {

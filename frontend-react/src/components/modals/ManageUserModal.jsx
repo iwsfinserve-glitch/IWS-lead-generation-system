@@ -25,11 +25,11 @@ export default function ManageUserModal({ user: existingUser, onClose, onSaved }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.name.trim() || !form.email.trim() || !form.phone_number.trim()) {
-      toast.error('Name, email, and phone number are required');
-      return;
-    }
+    if (form.name.trim().length < 2) { toast.error('Name must be at least 2 characters'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) { toast.error('Please enter a valid email address'); return; }
+    if (!/^\+?[0-9\s\-()]{7,20}$/.test(form.phone_number.trim())) { toast.error('Please enter a valid phone number'); return; }
     if (!isEdit && !form.password) { toast.error('Password is required for new users'); return; }
+    if (form.password && form.password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
 
     setSaving(true);
     try {
