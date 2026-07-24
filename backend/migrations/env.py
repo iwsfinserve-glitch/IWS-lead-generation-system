@@ -1,7 +1,10 @@
-# migrations/env.py
-
+import os
+import sys
 import asyncio
 from logging.config import fileConfig
+
+# Ensure app package is discoverable on sys.path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
