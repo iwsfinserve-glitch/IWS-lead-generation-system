@@ -93,10 +93,11 @@ export default function AllLeadsPage() {
       base = base.filter((l) => l.name.toLowerCase().includes(t) || (l.profession || '').toLowerCase().includes(t));
     }
     switch (tab) {
-      case 'Unassigned': return base.filter((l) => !l.assigned_rep_id && !['converted_to_investor','existing_investor'].includes(l.status));
-      case 'Active':     return base.filter((l) => l.assigned_rep_id && !['converted_to_investor','existing_investor'].includes(l.status));
+      case 'Unassigned': return base.filter((l) => l.status === 'unassigned');
+      case 'Active':     return base.filter((l) => ['in_progress', 'potential', 'non_potential'].includes(l.status));
       case 'Converted':  return base.filter((l) => l.status === 'converted_to_investor');
       case 'Investors':  return base.filter((l) => l.status === 'existing_investor');
+      case 'Transfers':  return [];
       default:           return base;
     }
   };
@@ -107,8 +108,8 @@ export default function AllLeadsPage() {
   const tabCount = (t) => {
     switch (t) {
       case 'All Leads':  return summary.total || leads.length;
-      case 'Unassigned': return summary.unassigned || leads.filter((l) => !l.assigned_rep_id && !['converted_to_investor','existing_investor'].includes(l.status)).length;
-      case 'Active':     return (summary.in_progress || 0) + (summary.potential || 0) + (summary.non_potential || 0) || leads.filter((l) => l.assigned_rep_id && !['converted_to_investor','existing_investor'].includes(l.status)).length;
+      case 'Unassigned': return summary.unassigned || leads.filter((l) => l.status === 'unassigned').length;
+      case 'Active':     return ((summary.in_progress || 0) + (summary.potential || 0) + (summary.non_potential || 0)) || leads.filter((l) => ['in_progress', 'potential', 'non_potential'].includes(l.status)).length;
       case 'Converted':  return summary.converted_to_investor || leads.filter((l) => l.status === 'converted_to_investor').length;
       case 'Investors':  return summary.existing_investor || leads.filter((l) => l.status === 'existing_investor').length;
       case 'Transfers':  return transfers.length;
