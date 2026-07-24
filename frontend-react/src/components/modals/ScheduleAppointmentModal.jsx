@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import Modal from '../common/Modal';
 import { getLeads } from '../../api/leadsApi';
 import { createAppointment } from '../../api/appointmentsApi';
+import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 
 export default function ScheduleAppointmentModal({ leadId, onClose, onCreated }) {
+  const { user } = useAuth();
   const [leads, setLeads]   = useState([]);
   const [form, setForm] = useState({
     lead_id: leadId || '',
@@ -19,10 +21,10 @@ export default function ScheduleAppointmentModal({ leadId, onClose, onCreated })
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!leadId) {
-      getLeads({ limit: 500 }).then(setLeads).catch(() => {});
+    if (!leadId && user?.id) {
+      getLeads({ assigned_rep_id: user.id, limit: 500 }).then(setLeads).catch(() => {});
     }
-  }, [leadId]);
+  }, [leadId, user?.id]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 

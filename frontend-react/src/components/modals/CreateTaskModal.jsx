@@ -21,11 +21,14 @@ export default function CreateTaskModal({ leadId, onClose, onCreated }) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!leadId) getLeads({ limit: 500 }).then(setLeads).catch(() => {});
+    if (!leadId && user?.id) {
+      const repId = (isManagerOrAdmin && form.assigned_to_id) ? parseInt(form.assigned_to_id) : user.id;
+      getLeads({ assigned_rep_id: repId, limit: 500 }).then(setLeads).catch(() => {});
+    }
     if (isManagerOrAdmin) {
       getUsers().then((u) => setReps(u.filter((x) => x.role === 'sales_rep'))).catch(() => {});
     }
-  }, [leadId, isManagerOrAdmin]);
+  }, [leadId, isManagerOrAdmin, user?.id, form.assigned_to_id]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
