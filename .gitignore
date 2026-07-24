@@ -6,7 +6,9 @@ architecture_report.md
 security_report.md
 frontend_refactoring_report.md
 frontend_improvement_plan.md
-test.py
+import_*.py
+backend/import_*.py
+test1.xlsx
 seed.py
 test_login.py
 backup_db.py
