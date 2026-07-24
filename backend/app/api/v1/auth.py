@@ -275,8 +275,14 @@ async def google_connect(
     After granting consent, Google redirects back to /google/callback
     with an auth code. The user's ID is passed in the OAuth `state` param.
     """
+    frontend_base = (
+        settings.GOOGLE_REDIRECT_URI
+        .split("/api/")[0]
+        .replace(":8000", ":5173")
+    )
+
     if not token:
-        raise HTTPException(status_code=401, detail="Pass your JWT as ?token=YOUR_JWT")
+        return RedirectResponse(url=f"{frontend_base}/login?google_error=1&error_msg=Missing+authentication+token")
 
     from jose import JWTError, jwt as jose_jwt
 
@@ -284,14 +290,19 @@ async def google_connect(
         payload = jose_jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id = payload.get("sub")
         if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token")
+            return RedirectResponse(url=f"{frontend_base}/login?google_error=1&error_msg=Invalid+token")
     except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        return RedirectResponse(url=f"{frontend_base}/login?google_error=1&error_msg=Token+expired.+Please+log+in+again.")
 
-    result = await db.execute(select(User).where(User.id == int(user_id)))
+    try:
+        user_id_int = int(user_id)
+    except (ValueError, TypeError):
+        return RedirectResponse(url=f"{frontend_base}/login?google_error=1&error_msg=Invalid+user+ID")
+
+    result = await db.execute(select(User).where(User.id == user_id_int))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        return RedirectResponse(url=f"{frontend_base}/login?google_error=1&error_msg=User+not+found.+Please+log+in+again.")
 
     flow = _build_google_flow()
     flow.redirect_uri = settings.GOOGLE_REDIRECT_URI
@@ -345,15 +356,25 @@ async def google_callback(
 
     # Parse user_id out of the opaque state string.
     # The state was set to the plain user ID in /google/connect.
+    frontend_base = (
+        settings.GOOGLE_REDIRECT_URI
+        .split("/api/")[0]
+        .replace(":8000", ":5173")
+    )
+
     try:
         user_id = int(state)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid state parameter")
+        return RedirectResponse(
+            url=f"{frontend_base}/appointments?google_error=1&error_msg=Invalid+state+parameter"
+        )
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        return RedirectResponse(
+            url=f"{frontend_base}/appointments?google_error=1&error_msg=User+not+found.+Please+log+in+again."
+        )
 
     user.google_access_token = encrypt_token(credentials.token)
     # Google only issues a refresh_token on the *first* authorization or when
