@@ -63,12 +63,16 @@ function TaskCard({ task, onComplete, onExtend, onApproveExt, onRejectExt, isMan
 
 
 function ExtRequestCard({ req, onApprove, onReject }) {
+  const reqTimeStr = req.requested_end_time
+    ? new Date(req.requested_end_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+    : req.requested_due_date;
+
   return (
     <div className="glass-card" style={{ padding: 16, display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'center' }}>
       <div>
         <div style={{ fontWeight: 700, marginBottom: 4 }}>{req.task_title || `Task #${req.task_id}`}</div>
         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-          Requested by: <b>{req.requested_by_name || 'Unknown'}</b> · New due: <b>{req.requested_due_date}</b>
+          Requested by: <b>{req.requested_by_name || 'Unknown'}</b> · New due: <b>{reqTimeStr}</b>
         </div>
         {req.reason && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4, fontStyle: 'italic' }}>{req.reason}</div>}
       </div>

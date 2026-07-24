@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class DueDateRequestCreate(BaseModel):
     task_id: int
     requested_date: date
+    requested_end_time: datetime | None = None
     reason: str = Field(..., min_length=1, max_length=1000)
 
 
@@ -21,6 +22,7 @@ class DueDateRequestRead(BaseModel):
     manager_id: int
     manager_name: str | None = None
     requested_date: date
+    requested_end_time: datetime | None = None
     reason: str
     status: str
     created_at: datetime
@@ -39,6 +41,7 @@ class DueDateRequestRead(BaseModel):
             manager_id=req.manager_id,
             manager_name=req.manager.name if req.manager else None,
             requested_date=req.requested_date,
+            requested_end_time=req.requested_end_time,
             reason=req.reason,
             status=req.status,
             created_at=req.created_at,

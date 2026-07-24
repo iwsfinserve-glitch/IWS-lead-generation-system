@@ -154,6 +154,9 @@ async def update_task(
     for field, value in update_data.items():
         setattr(task, field, value)
 
+    if "end_time" in update_data:
+        task.end_time_notified = False
+
     if "status" in update_data and update_data["status"] == "completed" and old_status != "completed":
         task.completed_at = datetime.now(timezone.utc)
     elif "status" in update_data and update_data["status"] == "needsAction":
