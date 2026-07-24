@@ -59,19 +59,19 @@ async def seed():
             hashed_password=hash_password("admin123"), role=UserRole.admin,
         )
         manager = User(
-            name="Priya Naik", email="priya@iwsfinserve.com", phone_number="+91 98200 44556",
+            name="Priya Naik", email="priya@iwsfinserv.com", phone_number="+91 98200 44556",
             hashed_password=hash_password("manager123"), role=UserRole.manager,
         )
         rep_rahul = User(
-            name="Rahul Desai", email="rahul@iwsfinserve.com", phone_number="+91 98200 77889",
+            name="Rahul Desai", email="rahul@iwsfinserv.com", phone_number="+91 98200 77889",
             hashed_password=hash_password("rahul123"), role=UserRole.sales_rep,
         )
         rep_sneha = User(
-            name="Sneha Kamat", email="sneha@iwsfinserve.com", phone_number="+91 98200 99001",
+            name="Sneha Kamat", email="sneha@iwsfinserv.com", phone_number="+91 98200 99001",
             hashed_password=hash_password("sneha123"), role=UserRole.sales_rep,
         )
         rep_vikram = User(
-            name="Vikram Prabhu", email="vikram@iwsfinserve.com", phone_number="+91 98200 33445",
+            name="Vikram Prabhu", email="vikram@iwsfinserv.com", phone_number="+91 98200 33445",
             hashed_password=hash_password("vikram123"), role=UserRole.sales_rep,
         )
 
@@ -289,7 +289,7 @@ async def seed():
                 lead_id=vikrant.id, user_id=rep_sneha.id,
                 event_type="appointment_booked", created_at=_ts(days_ago=25),
                 event_metadata={"title": "AIF Mandate Discussion", "mode": "in_person",
-                                "location": "IWS FinServe Office, Panaji"},
+                                "location": "IWS FinServ Office, Panaji"},
             ),
             LeadTimeline(
                 lead_id=vikrant.id, user_id=rep_sneha.id,
@@ -342,7 +342,7 @@ async def seed():
                 title="Portfolio Review & PMS Strategy Consultation",
                 note="Client wants customized equity & fixed income asset allocation model",
                 mode=AppointmentMode.in_person,
-                location="IWS FinServe Office, Alto Porvorim",
+                location="IWS FinServ Office, Alto Porvorim",
                 start_time=_future(days=2, hours=10),
                 end_time=_future(days=2, hours=12),
             ),
@@ -376,7 +376,7 @@ async def seed():
                 title="KYC Documentation & Nominee Verification",
                 note="Complete SEBI/AMFI PAN, Aadhaar, and bank account linking",
                 mode=AppointmentMode.in_person,
-                location="IWS FinServe Office, Panaji",
+                location="IWS FinServ Office, Panaji",
                 start_time=_future(days=5, hours=10),
                 end_time=_future(days=5, hours=11),
             ),
@@ -387,7 +387,7 @@ async def seed():
                 title="AIF Mandate Signing — Alternative Investments",
                 note="Finalized ₹2.8 Cr AIF portfolio mandate signing",
                 mode=AppointmentMode.in_person,
-                location="IWS FinServe Office, Panaji",
+                location="IWS FinServ Office, Panaji",
                 start_time=_ts(days_ago=10, hours_ago=4),
                 end_time=_ts(days_ago=10, hours_ago=3),
             ),
@@ -630,10 +630,10 @@ async def seed():
         print("=" * 60)
         print("\n📋  Login credentials:")
         print("   Admin:     admin@example.com       / admin123")
-        print("   Manager:   priya@iwsfinserve.com   / manager123")
-        print("   Rep 1:     rahul@iwsfinserve.com   / rahul123")
-        print("   Rep 2:     sneha@iwsfinserve.com   / sneha123")
-        print("   Rep 3:     vikram@iwsfinserve.com  / vikram123")
+        print("   Manager:   priya@iwsfinserv.com   / manager123")
+        print("   Rep 1:     rahul@iwsfinserv.com   / rahul123")
+        print("   Rep 2:     sneha@iwsfinserv.com   / sneha123")
+        print("   Rep 3:     vikram@iwsfinserv.com  / vikram123")
 
     await engine.dispose()
 

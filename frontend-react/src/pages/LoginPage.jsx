@@ -6,8 +6,8 @@ import { Zap, Eye, EyeOff, Loader2 } from 'lucide-react';
 
 const DEMO_CREDS = [
   { label: 'Admin', email: 'admin@example.com', password: 'admin123', role: 'admin' },
-  { label: 'Manager', email: 'anish@iwsfinserve.com', password: 'manager123', role: 'manager' },
-  { label: 'Sales Rep', email: 'rahul@iwsfinserve.com', password: 'rahul123', role: 'sales_rep' },
+  { label: 'Manager', email: 'anish@iwsfinserv.com', password: 'manager123', role: 'manager' },
+  { label: 'Sales Rep', email: 'rahul@iwsfinserv.com', password: 'rahul123', role: 'sales_rep' },
 ];
 
 export default function LoginPage() {
@@ -85,7 +85,7 @@ export default function LoginPage() {
             <Zap size={28} color="#fff" />
           </div>
           <h1 style={{ fontSize: '1.75rem', marginBottom: 6 }}>Lead Management</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>IWS Finserve CRM — Sign in to your account</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>IWS Finserv CRM — Sign in to your account</p>
         </div>
 
         {/* Card */}
@@ -173,7 +173,7 @@ export default function LoginPage() {
         </div>
 
         <p style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 24 }}>
-          IWS Finserve Lead Management System © {new Date().getFullYear()}
+          IWS Finserv Lead Management System © {new Date().getFullYear()}
         </p>
       </div>
     </div>

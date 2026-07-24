@@ -47,7 +47,7 @@ export default function Sidebar() {
             <Zap size={16} color="#fff" />
           </div>
           <div>
-            <div className="sidebar-logo-text">IWS Finserve</div>
+            <div className="sidebar-logo-text">IWS Finserv</div>
             <div className="sidebar-logo-sub">Lead CRM</div>
           </div>
         </div>

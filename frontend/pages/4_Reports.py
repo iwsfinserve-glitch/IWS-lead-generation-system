@@ -13,7 +13,7 @@ from core.state import state
 from core.styles import inject_global_styles
 from components.layout import render_sidebar
 
-st.set_page_config(page_title="Reports | IWS Finserve", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Reports | IWS Finserv", page_icon="📊", layout="wide")
 inject_global_styles()
 require_login()
 
