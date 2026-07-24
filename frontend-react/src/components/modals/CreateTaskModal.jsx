@@ -15,6 +15,7 @@ export default function CreateTaskModal({ leadId, onClose, onCreated }) {
     title: '',
     notes: '',
     due: '',
+    due_time: '',
     assigned_to_id: '',
   });
   const [saving, setSaving] = useState(false);
@@ -36,10 +37,16 @@ export default function CreateTaskModal({ leadId, onClose, onCreated }) {
     try {
       const selectedLead = leads.find(l => l.id === parseInt(form.lead_id));
       const leadContext = selectedLead ? `[Lead: ${selectedLead.name}] ` : '';
+      let endTime = null;
+      if (form.due && form.due_time) {
+        endTime = new Date(`${form.due}T${form.due_time}:00`).toISOString();
+      }
+
       const payload = {
         title:   leadContext + form.title.trim(),
         notes:   form.notes.trim() || null,
         due:     form.due || null,
+        end_time: endTime,
         user_id: form.assigned_to_id ? parseInt(form.assigned_to_id) : (isManagerOrAdmin ? null : user?.id),
       };
       if (isManagerOrAdmin && !payload.user_id) {
@@ -73,10 +80,17 @@ export default function CreateTaskModal({ leadId, onClose, onCreated }) {
           <input className="form-input" placeholder="e.g. Follow up with client" value={form.title}
             onChange={(e) => set('title', e.target.value)} id="task-title" />
         </div>
-        <div className="form-group">
-          <label className="form-label">Due Date</label>
-          <input type="date" className="form-input" value={form.due}
-            onChange={(e) => set('due', e.target.value)} id="task-due" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="form-group">
+            <label className="form-label">Due Date</label>
+            <input type="date" className="form-input" value={form.due}
+              onChange={(e) => set('due', e.target.value)} id="task-due" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Due / End Time</label>
+            <input type="time" className="form-input" value={form.due_time}
+              onChange={(e) => set('due_time', e.target.value)} id="task-due-time" />
+          </div>
         </div>
         {isManagerOrAdmin && reps.length > 0 && (
           <div className="form-group">
