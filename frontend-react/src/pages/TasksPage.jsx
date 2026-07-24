@@ -66,6 +66,7 @@ function ExtRequestCard({ req, onApprove, onReject }) {
   const reqTimeStr = req.requested_end_time
     ? new Date(req.requested_end_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
     : req.requested_due_date;
+  const isPending = req.status === 'pending';
 
   return (
     <div className="glass-card" style={{ padding: 16, display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'center' }}>
@@ -76,9 +77,17 @@ function ExtRequestCard({ req, onApprove, onReject }) {
         </div>
         {req.reason && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4, fontStyle: 'italic' }}>{req.reason}</div>}
       </div>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button className="btn btn-primary btn-sm" onClick={() => onApprove(req.id)} id={`ext-approve-${req.id}`}>Approve</button>
-        <button className="btn btn-danger btn-sm"  onClick={() => onReject(req.id)}  id={`ext-reject-${req.id}`}>Reject</button>
+      <div>
+        {isPending ? (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-primary btn-sm" onClick={() => onApprove(req.id)} id={`ext-approve-${req.id}`}>Approve</button>
+            <button className="btn btn-danger btn-sm"  onClick={() => onReject(req.id)}  id={`ext-reject-${req.id}`}>Reject</button>
+          </div>
+        ) : (
+          <span className={`badge ${req.status === 'approved' ? 'badge-converted' : 'badge-non-pot'}`}>
+            {req.status.toUpperCase()}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -99,7 +108,7 @@ export default function TasksPage() {
     try {
       const [t, e] = await Promise.all([
         getTasks({ limit: 500 }),
-        isManagerOrAdmin ? getDueDateRequests() : Promise.resolve([]),
+        isManagerOrAdmin ? getDueDateRequests({ status: 'pending' }) : Promise.resolve([]),
       ]);
       setTasks(t);
       setExtReqs(e);
@@ -123,6 +132,7 @@ export default function TasksPage() {
     try {
       await updateDueDateRequest(id, { status: 'approved' });
       toast.success('Extension approved!');
+      setExtReqs((prev) => prev.filter((r) => r.id !== id));
       fetchAll();
     } catch { toast.error('Failed'); }
   };
@@ -131,6 +141,7 @@ export default function TasksPage() {
     try {
       await updateDueDateRequest(id, { status: 'rejected' });
       toast.success('Extension rejected.');
+      setExtReqs((prev) => prev.filter((r) => r.id !== id));
       fetchAll();
     } catch { toast.error('Failed'); }
   };
