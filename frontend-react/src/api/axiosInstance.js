@@ -1,7 +1,12 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
-const API_PREFIX = API_BASE_URL ? `${API_BASE_URL.replace(/\/+$/, '')}/api/v1` : '/api/v1';
+const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').trim();
+let normalizedBaseUrl = rawBaseUrl;
+if (normalizedBaseUrl && !normalizedBaseUrl.startsWith('http://') && !normalizedBaseUrl.startsWith('https://')) {
+  normalizedBaseUrl = `https://${normalizedBaseUrl}`;
+}
+
+const API_PREFIX = normalizedBaseUrl ? `${normalizedBaseUrl.replace(/\/+$/, '')}/api/v1` : '/api/v1';
 
 const axiosInstance = axios.create({
   baseURL: API_PREFIX,
