@@ -2,8 +2,8 @@
 Pydantic schemas for Task operations.
 """
 
-from datetime import date, datetime
-from pydantic import BaseModel, Field
+from datetime import date, datetime, timezone
+from pydantic import BaseModel, Field, field_validator
 
 
 class TaskCreate(BaseModel):
@@ -11,6 +11,14 @@ class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     notes: str | None = None
     due: date | None = None
+    end_time: datetime | None = None
+
+    @field_validator("end_time")
+    @classmethod
+    def validate_end_time(cls, v: datetime | None) -> datetime | None:
+        if v and v < datetime.now(timezone.utc):
+            raise ValueError("end_time cannot be in the past")
+        return v
 
 
 class TaskRead(BaseModel):
@@ -22,6 +30,8 @@ class TaskRead(BaseModel):
     status: str
     assigned_on: datetime
     due: date | None
+    end_time: datetime | None = None
+    end_time_notified: bool = False
     completed_at: datetime | None
     google_task_id: str | None
     last_synced_at: datetime | None
@@ -41,6 +51,8 @@ class TaskRead(BaseModel):
             status=task.status,
             assigned_on=task.assigned_on,
             due=task.due,
+            end_time=task.end_time,
+            end_time_notified=task.end_time_notified,
             completed_at=task.completed_at,
             google_task_id=task.google_task_id,
             last_synced_at=task.last_synced_at,
@@ -54,6 +66,14 @@ class TaskUpdate(BaseModel):
     notes: str | None = None
     status: str | None = Field(None, pattern=r"^(needsAction|completed)$")
     due: date | None = None
+    end_time: datetime | None = None
+
+    @field_validator("end_time")
+    @classmethod
+    def validate_end_time(cls, v: datetime | None) -> datetime | None:
+        if v and v < datetime.now(timezone.utc):
+            raise ValueError("end_time cannot be in the past")
+        return v
 
 
 class TaskSelfCreate(BaseModel):
@@ -61,3 +81,11 @@ class TaskSelfCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     notes: str | None = None
     due: date | None = None
+    end_time: datetime | None = None
+
+    @field_validator("end_time")
+    @classmethod
+    def validate_end_time(cls, v: datetime | None) -> datetime | None:
+        if v and v < datetime.now(timezone.utc):
+            raise ValueError("end_time cannot be in the past")
+        return v

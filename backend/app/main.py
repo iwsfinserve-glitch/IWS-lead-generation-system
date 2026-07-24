@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
-from app.core.scheduler import scheduler, setup_scheduler, _reconcile_appointments_job
+from app.core.scheduler import scheduler, setup_scheduler, _reconcile_appointments_job, _reconcile_tasks_job
 from app.api.v1 import auth, sources, leads, appointments, tasks, reports
 from app.api.v1 import due_date_requests, notifications, lead_transfers, ai_insights
 
@@ -47,6 +47,7 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     # Fire reconcile immediately on startup to catch thresholds crossed while offline
     asyncio.ensure_future(_reconcile_appointments_job())
+    asyncio.ensure_future(_reconcile_tasks_job())
     yield
     scheduler.shutdown()
 
