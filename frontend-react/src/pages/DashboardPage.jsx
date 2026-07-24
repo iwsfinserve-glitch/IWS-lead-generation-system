@@ -90,7 +90,7 @@ function SalesRepDashboard() {
             <div key={t.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
               <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{t.title}</div>
               <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                Due: {t.due || 'No due date'} · {t.lead_name || ''}
+                Due: {t.end_time ? new Date(t.end_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : (t.due || 'No due date')} {t.lead_name ? `· ${t.lead_name}` : ''}
               </div>
             </div>
           ))}

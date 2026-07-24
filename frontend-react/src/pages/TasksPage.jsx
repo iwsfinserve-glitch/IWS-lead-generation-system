@@ -13,7 +13,12 @@ const PAGE_SIZE = 15;
 function TaskCard({ task, onComplete, onExtend, onApproveExt, onRejectExt, isManagerOrAdmin, isSelf }) {
   const isPending   = task.status === 'needsAction';
   const isCompleted = task.status === 'completed';
-  const isOverdue   = isPending && task.due && new Date(task.due) < new Date();
+  const targetEnd   = task.end_time ? new Date(task.end_time) : (task.due ? new Date(`${task.due}T23:59:59`) : null);
+  const isOverdue   = isPending && targetEnd && targetEnd < new Date();
+
+  const formattedEndTime = task.end_time
+    ? new Date(task.end_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+    : null;
 
   return (
     <div className="glass-card" style={{ padding: 16, display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'start', borderLeft: `3px solid ${isOverdue ? 'var(--danger)' : isCompleted ? 'var(--success)' : 'var(--primary)'}` }}>
@@ -25,7 +30,11 @@ function TaskCard({ task, onComplete, onExtend, onApproveExt, onRejectExt, isMan
           {isCompleted && <span className="badge badge-converted">Done</span>}
         </div>
         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          {task.due        && <span>📅 Due: {task.due}</span>}
+          {formattedEndTime ? (
+            <span>⏰ End: {formattedEndTime}</span>
+          ) : task.due ? (
+            <span>📅 Due: {task.due}</span>
+          ) : null}
           {task.user_name  && <span>🧑 {task.user_name}</span>}
           {task.assigned_by_name && <span>👤 Assigned by: {task.assigned_by_name}</span>}
         </div>
