@@ -91,6 +91,7 @@ async def create_due_date_request(
 
 @router.get("/", response_model=list[DueDateRequestRead])
 async def list_due_date_requests(
+    req_status: str | None = Query(None, alias="status"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -105,6 +106,9 @@ async def list_due_date_requests(
         query = query.where(TaskDueDateRequest.requested_by_id == current_user.id)
     else:
         query = query.where(TaskDueDateRequest.manager_id == current_user.id)
+
+    if req_status:
+        query = query.where(TaskDueDateRequest.status == req_status)
 
     query = query.order_by(TaskDueDateRequest.created_at.desc())
     result = await db.execute(query)

@@ -65,6 +65,7 @@ export default function AllLeadsPage() {
     try {
       await updateLeadTransfer(id, { status });
       toast.success(status === 'approved' ? 'Transfer approved!' : 'Transfer rejected.');
+      setTransfers((prev) => prev.filter((t) => t.id !== id));
       fetchData();
     } catch {
       toast.error('Action failed');
@@ -112,7 +113,7 @@ export default function AllLeadsPage() {
       case 'Active':     return ((summary.in_progress || 0) + (summary.potential || 0) + (summary.non_potential || 0)) || leads.filter((l) => ['in_progress', 'potential', 'non_potential'].includes(l.status)).length;
       case 'Converted':  return summary.converted_to_investor || leads.filter((l) => l.status === 'converted_to_investor').length;
       case 'Investors':  return summary.existing_investor || leads.filter((l) => l.status === 'existing_investor').length;
-      case 'Transfers':  return transfers.length;
+      case 'Transfers':  return transfers.filter((t) => t.status === 'pending').length;
       default: return 0;
     }
   };
@@ -170,12 +171,12 @@ export default function AllLeadsPage() {
         {/* Transfer requests tab */}
         {tab === 'Transfers' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {transfers.length === 0 ? (
+            {transfers.filter((r) => r.status === 'pending').length === 0 ? (
               <div className="empty-state">
                 <div className="empty-state-icon">✅</div>
                 <div className="empty-state-title">No pending transfer requests</div>
               </div>
-            ) : transfers.map((r) => (
+            ) : transfers.filter((r) => r.status === 'pending').map((r) => (
               <div key={r.id} className="glass-card" style={{ padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <div style={{ fontWeight: 700 }}>{r.lead_name}</div>
