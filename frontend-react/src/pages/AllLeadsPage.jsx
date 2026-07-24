@@ -13,12 +13,13 @@ import toast from 'react-hot-toast';
 
 const PAGE_SIZE = 15;
 
-const TABS_MANAGER = ['All Leads', 'Unassigned', 'Active', 'Converted', 'Investors', 'Transfers'];
-const TABS_REP     = ['All Leads', 'Unassigned', 'Active', 'Converted', 'Investors'];
+const TABS_MANAGER = ['All Leads', 'My Leads', 'Unassigned', 'Active', 'Converted', 'Investors', 'Transfers'];
+const TABS_REP     = ['All Leads', 'My Leads', 'Unassigned', 'Active', 'Converted', 'Investors'];
+const TABS_ADMIN   = ['All Leads', 'Unassigned', 'Active', 'Converted', 'Investors', 'Transfers'];
 
 export default function AllLeadsPage() {
-  const { isManagerOrAdmin, user } = useAuth();
-  const TABS = isManagerOrAdmin ? TABS_MANAGER : TABS_REP;
+  const { isManagerOrAdmin, isAdmin, isManager, user } = useAuth();
+  const TABS = isAdmin ? TABS_ADMIN : isManager ? TABS_MANAGER : TABS_REP;
 
   const [tab, setTab]             = useState('All Leads');
   const [leads, setLeads]         = useState([]);
@@ -94,6 +95,7 @@ export default function AllLeadsPage() {
       base = base.filter((l) => l.name.toLowerCase().includes(t) || (l.profession || '').toLowerCase().includes(t));
     }
     switch (tab) {
+      case 'My Leads':   return base.filter((l) => l.assigned_rep_id === user?.id);
       case 'Unassigned': return base.filter((l) => l.status === 'unassigned');
       case 'Active':     return base.filter((l) => ['in_progress', 'potential', 'non_potential'].includes(l.status));
       case 'Converted':  return base.filter((l) => l.status === 'converted_to_investor');
@@ -109,6 +111,7 @@ export default function AllLeadsPage() {
   const tabCount = (t) => {
     switch (t) {
       case 'All Leads':  return summary.total || leads.length;
+      case 'My Leads':   return leads.filter((l) => l.assigned_rep_id === user?.id).length;
       case 'Unassigned': return summary.unassigned || leads.filter((l) => l.status === 'unassigned').length;
       case 'Active':     return ((summary.in_progress || 0) + (summary.potential || 0) + (summary.non_potential || 0)) || leads.filter((l) => ['in_progress', 'potential', 'non_potential'].includes(l.status)).length;
       case 'Converted':  return summary.converted_to_investor || leads.filter((l) => l.status === 'converted_to_investor').length;
