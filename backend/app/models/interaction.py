@@ -223,6 +223,9 @@ class TaskDueDateRequest(Base):
     )
 
     requested_date: Mapped[date] = mapped_column(Date, nullable=False)
+    requested_end_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
 
     status: Mapped[str] = mapped_column(

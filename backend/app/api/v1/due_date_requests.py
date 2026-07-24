@@ -64,6 +64,7 @@ async def create_due_date_request(
         requested_by_id=current_user.id,
         manager_id=task.assigned_by,
         requested_date=payload.requested_date,
+        requested_end_time=payload.requested_end_time,
         reason=payload.reason,
     )
     db.add(req)
@@ -135,12 +136,15 @@ async def update_due_date_request(
     req.status = payload.status
     req.resolved_at = datetime.now(timezone.utc)
 
-    # If approved, update the actual task due date
+    # If approved, update the actual task due date and end time
     if payload.status == "approved":
         task_result = await db.execute(select(Task).where(Task.id == req.task_id))
         task = task_result.scalar_one_or_none()
         if task:
             task.due = req.requested_date
+            if req.requested_end_time is not None:
+                task.end_time = req.requested_end_time
+                task.end_time_notified = False
 
     action_word = "approved" if payload.status == "approved" else "rejected"
     task_title = req.task.title if req.task else f"Task #{req.task_id}"

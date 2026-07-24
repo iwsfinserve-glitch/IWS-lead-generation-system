@@ -6,9 +6,12 @@ import toast from 'react-hot-toast';
 
 export default function RequestDueDateModal({ task, onClose, onRequested }) {
   const { user, isManagerOrAdmin } = useAuth();
-  const [newDue, setNewDue] = useState(task?.due || '');
-  const [reason, setReason] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [newDue, setNewDue]   = useState(task?.due || '');
+  const [newTime, setNewTime] = useState(
+    task?.end_time ? new Date(task.end_time).toTimeString().slice(0, 5) : ''
+  );
+  const [reason, setReason]   = useState('');
+  const [saving, setSaving]   = useState(false);
 
   const canEditDirectly = isManagerOrAdmin || task?.assigned_by === user?.id || !task?.assigned_by;
 
@@ -19,11 +22,21 @@ export default function RequestDueDateModal({ task, onClose, onRequested }) {
     if (!canEditDirectly && reason.trim().length < 5) { toast.error('A detailed reason (min 5 chars) is required for extension requests'); return; }
     setSaving(true);
     try {
+      let requestedEndTime = null;
+      if (newDue && newTime) {
+        requestedEndTime = new Date(`${newDue}T${newTime}:00`).toISOString();
+      }
+
       if (canEditDirectly) {
-        await updateTask(task.id, { due: newDue });
-        toast.success('Due date updated!');
+        await updateTask(task.id, { due: newDue, end_time: requestedEndTime });
+        toast.success('Due date & time updated!');
       } else {
-        await createDueDateRequest({ task_id: task.id, requested_date: newDue, reason: reason.trim() });
+        await createDueDateRequest({
+          task_id: task.id,
+          requested_date: newDue,
+          requested_end_time: requestedEndTime,
+          reason: reason.trim(),
+        });
         toast.success('Extension request submitted!');
       }
       onRequested?.();
@@ -41,10 +54,17 @@ export default function RequestDueDateModal({ task, onClose, onRequested }) {
           <div style={{ fontWeight: 700, marginBottom: 4 }}>{task?.title}</div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Current due: {task?.due || 'None'}</div>
         </div>
-        <div className="form-group">
-          <label className="form-label">Requested New Due Date *</label>
-          <input type="date" className="form-input" value={newDue}
-            onChange={(e) => setNewDue(e.target.value)} id="new-due-date" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="form-group">
+            <label className="form-label">Requested Due Date *</label>
+            <input type="date" className="form-input" value={newDue}
+              onChange={(e) => setNewDue(e.target.value)} id="new-due-date" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Requested Due Time</label>
+            <input type="time" className="form-input" value={newTime}
+              onChange={(e) => setNewTime(e.target.value)} id="new-due-time" />
+          </div>
         </div>
         {!canEditDirectly && (
           <div className="form-group">
