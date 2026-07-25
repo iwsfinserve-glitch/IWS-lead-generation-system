@@ -22,6 +22,7 @@ function SalesRepDashboard() {
   const [allLeads, setAllLeads]     = useState([]);
   const [summary, setSummary]       = useState({});
   const [sources, setSources]       = useState([]);
+  const [reps, setReps]             = useState([]);
   const [appointments, setAppts]    = useState([]);
   const [tasks, setTasks]           = useState([]);
   const [loading, setLoading]       = useState(true);
@@ -29,6 +30,7 @@ function SalesRepDashboard() {
   const [leadSearch, setLeadSearch] = useState('');
   const [leadStatus, setLeadStatus] = useState('');
   const [leadSource, setLeadSource] = useState('');
+  const [leadRep, setLeadRep]       = useState('');
 
   useEffect(() => {
     Promise.all([
@@ -37,13 +39,15 @@ function SalesRepDashboard() {
       getAppointments(),
       getTasks({ limit: 100 }),
       getSources().catch(() => []),
-    ]).then(([l, s, a, t, src]) => {
+      getUsers().catch(() => []),
+    ]).then(([l, s, a, t, src, usersRes]) => {
       setAllLeads(l);
       setLeads(l.slice(0, 10));
       setSummary(s);
       setAppts(a);
       setTasks(t);
       setSources(src);
+      setReps(usersRes.filter(u => u.role === 'manager' || u.role === 'sales_rep'));
     }).catch(() => toast.error('Failed to load dashboard data'))
       .finally(() => setLoading(false));
   }, [user.id]);
@@ -69,9 +73,16 @@ function SalesRepDashboard() {
     }
     if (leadStatus && l.status !== leadStatus) return false;
     if (leadSource && String(l.source_id) !== leadSource) return false;
+    if (leadRep) {
+      if (leadRep === 'unassigned') {
+        if (l.assigned_rep_id) return false;
+      } else if (String(l.assigned_rep_id) !== leadRep) {
+        return false;
+      }
+    }
     return true;
   });
-  const hasLeadFilters = leadSearch.trim() || leadStatus || leadSource;
+  const hasLeadFilters = leadSearch.trim() || leadStatus || leadSource || leadRep;
 
   const now = new Date().toISOString();
   const upcoming = appointments.filter((a) => a.start_time >= now).sort((a, b) => a.start_time.localeCompare(b.start_time)).slice(0, 5);
@@ -156,8 +167,8 @@ function SalesRepDashboard() {
           />
         </div>
         <select
-          className="form-input"
-          style={{ minWidth: 130, padding: '7px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
+          className="form-select"
+          style={{ width: 'auto', minWidth: 130, padding: '7px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
           value={leadStatus}
           onChange={(e) => setLeadStatus(e.target.value)}
           id="dashboard-lead-status"
@@ -165,8 +176,8 @@ function SalesRepDashboard() {
           {STATUS_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <select
-          className="form-input"
-          style={{ minWidth: 130, padding: '7px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
+          className="form-select"
+          style={{ width: 'auto', minWidth: 130, padding: '7px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
           value={leadSource}
           onChange={(e) => setLeadSource(e.target.value)}
           id="dashboard-lead-source"
@@ -174,8 +185,19 @@ function SalesRepDashboard() {
           <option value="">All Sources</option>
           {sources.map((s) => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
         </select>
+        <select
+          className="form-select"
+          style={{ width: 'auto', minWidth: 130, padding: '7px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
+          value={leadRep}
+          onChange={(e) => setLeadRep(e.target.value)}
+          id="dashboard-lead-rep"
+        >
+          <option value="">All Reps</option>
+          <option value="unassigned">Unassigned</option>
+          {reps.map((r) => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
+        </select>
         {hasLeadFilters && (
-          <button className="btn btn-ghost btn-sm" onClick={() => { setLeadSearch(''); setLeadStatus(''); setLeadSource(''); }} id="dashboard-lead-clear">
+          <button className="btn btn-ghost btn-sm" onClick={() => { setLeadSearch(''); setLeadStatus(''); setLeadSource(''); setLeadRep(''); }} id="dashboard-lead-clear">
             <X size={13} /> Clear
           </button>
         )}
@@ -203,6 +225,7 @@ function ManagerDashboard() {
   const [allLeads, setAllLeads]     = useState([]);
   const [summary, setSummary]       = useState({});
   const [sources, setSources]       = useState([]);
+  const [reps, setReps]             = useState([]);
   const [appointments, setAppts]    = useState([]);
   const [tasks, setTasks]           = useState([]);
   const [teamSize, setTeamSize]     = useState(0);
@@ -211,6 +234,7 @@ function ManagerDashboard() {
   const [leadSearch, setLeadSearch] = useState('');
   const [leadStatus, setLeadStatus] = useState('');
   const [leadSource, setLeadSource] = useState('');
+  const [leadRep, setLeadRep]       = useState('');
 
   useEffect(() => {
     Promise.all([
@@ -218,7 +242,7 @@ function ManagerDashboard() {
       getLeadsSummary({ assigned_rep_id: user.id }).catch(() => ({})),
       getAppointments(),
       getTasks({ limit: 100 }),
-      getUsers().then((u) => u.filter((x) => x.manager_id === user.id).length),
+      getUsers().then((u) => { setReps(u.filter(x => x.role === 'manager' || x.role === 'sales_rep')); return u.filter((x) => x.manager_id === user.id).length; }),
       getSources().catch(() => []),
     ]).then(([l, s, a, t, ts, src]) => {
       setAllLeads(l);
@@ -252,9 +276,16 @@ function ManagerDashboard() {
     }
     if (leadStatus && l.status !== leadStatus) return false;
     if (leadSource && String(l.source_id) !== leadSource) return false;
+    if (leadRep) {
+      if (leadRep === 'unassigned') {
+        if (l.assigned_rep_id) return false;
+      } else if (String(l.assigned_rep_id) !== leadRep) {
+        return false;
+      }
+    }
     return true;
   });
-  const hasLeadFilters = leadSearch.trim() || leadStatus || leadSource;
+  const hasLeadFilters = leadSearch.trim() || leadStatus || leadSource || leadRep;
 
   const now = new Date().toISOString();
   const upcoming  = appointments.filter((a) => a.start_time >= now).sort((a, b) => a.start_time.localeCompare(b.start_time)).slice(0, 5);
@@ -363,8 +394,8 @@ function ManagerDashboard() {
           />
         </div>
         <select
-          className="form-input"
-          style={{ minWidth: 130, padding: '7px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
+          className="form-select"
+          style={{ width: 'auto', minWidth: 130, padding: '7px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
           value={leadStatus}
           onChange={(e) => setLeadStatus(e.target.value)}
           id="mgr-dashboard-lead-status"
@@ -372,8 +403,8 @@ function ManagerDashboard() {
           {STATUS_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <select
-          className="form-input"
-          style={{ minWidth: 130, padding: '7px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
+          className="form-select"
+          style={{ width: 'auto', minWidth: 130, padding: '7px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
           value={leadSource}
           onChange={(e) => setLeadSource(e.target.value)}
           id="mgr-dashboard-lead-source"
@@ -381,8 +412,19 @@ function ManagerDashboard() {
           <option value="">All Sources</option>
           {sources.map((s) => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
         </select>
+        <select
+          className="form-select"
+          style={{ width: 'auto', minWidth: 130, padding: '7px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
+          value={leadRep}
+          onChange={(e) => setLeadRep(e.target.value)}
+          id="mgr-dashboard-lead-rep"
+        >
+          <option value="">All Reps</option>
+          <option value="unassigned">Unassigned</option>
+          {reps.map((r) => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
+        </select>
         {hasLeadFilters && (
-          <button className="btn btn-ghost btn-sm" onClick={() => { setLeadSearch(''); setLeadStatus(''); setLeadSource(''); }} id="mgr-dashboard-lead-clear">
+          <button className="btn btn-ghost btn-sm" onClick={() => { setLeadSearch(''); setLeadStatus(''); setLeadSource(''); setLeadRep(''); }} id="mgr-dashboard-lead-clear">
             <X size={13} /> Clear
           </button>
         )}

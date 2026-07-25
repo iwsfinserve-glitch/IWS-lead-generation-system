@@ -7,7 +7,7 @@ import CreateLeadModal from '../components/modals/CreateLeadModal';
 import BulkImportModal from '../components/modals/BulkImportModal';
 import BulkAssignModal from '../components/modals/BulkAssignModal';
 import { getLeads, claimLead, getLeadsSummary, bulkDeleteLeads, getSources } from '../api/leadsApi';
-import { getLeadTransferRequests, updateLeadTransfer } from '../api/usersApi';
+import { getLeadTransferRequests, updateLeadTransfer, getUsers } from '../api/usersApi';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 
@@ -36,6 +36,7 @@ export default function AllLeadsPage() {
   const [summary, setSummary]     = useState({});
   const [transfers, setTransfers] = useState([]);
   const [sources, setSources]     = useState([]);
+  const [reps, setReps]           = useState([]);
   const [loading, setLoading]     = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
@@ -44,19 +45,22 @@ export default function AllLeadsPage() {
   const [search, setSearch]       = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterSource, setFilterSource] = useState('');
+  const [filterRep, setFilterRep]       = useState('');
   const [page, setPage]           = useState(1);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [l, s, src] = await Promise.all([
+      const [l, s, src, usersRes] = await Promise.all([
         getLeads({ limit: 20000 }),
         getLeadsSummary().catch(() => ({})),
         getSources().catch(() => []),
+        getUsers().catch(() => []),
       ]);
       setLeads(l);
       setSummary(s);
       setSources(src);
+      setReps(usersRes.filter(u => u.role === 'manager' || u.role === 'sales_rep'));
       if (isManagerOrAdmin) {
         const t = await getLeadTransferRequests({ status: 'pending' });
         setTransfers(t);
@@ -109,10 +113,11 @@ export default function AllLeadsPage() {
     setSearch('');
     setFilterStatus('');
     setFilterSource('');
+    setFilterRep('');
     setPage(1);
   };
 
-  const hasActiveFilters = search.trim() || filterStatus || filterSource;
+  const hasActiveFilters = search.trim() || filterStatus || filterSource || filterRep;
 
   // Filter leads by tab + search + status + source
   const tabLeads = () => {
@@ -135,6 +140,14 @@ export default function AllLeadsPage() {
     // Source filter
     if (filterSource) {
       base = base.filter((l) => String(l.source_id) === filterSource);
+    }
+    // Assigned Rep filter
+    if (filterRep) {
+      if (filterRep === 'unassigned') {
+        base = base.filter((l) => !l.assigned_rep_id);
+      } else {
+        base = base.filter((l) => String(l.assigned_rep_id) === filterRep);
+      }
     }
     switch (tab) {
       case 'My Leads':   return base.filter((l) => l.assigned_rep_id === user?.id);
@@ -201,8 +214,8 @@ export default function AllLeadsPage() {
 
           {/* Status Filter */}
           <select
-            className="form-input"
-            style={{ minWidth: 150, padding: '8px 12px', fontSize: '0.875rem', cursor: 'pointer' }}
+            className="form-select"
+            style={{ width: 'auto', minWidth: 150, padding: '8px 12px', fontSize: '0.875rem', cursor: 'pointer' }}
             value={filterStatus}
             onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}
             id="all-leads-filter-status"
@@ -214,8 +227,8 @@ export default function AllLeadsPage() {
 
           {/* Source Filter */}
           <select
-            className="form-input"
-            style={{ minWidth: 150, padding: '8px 12px', fontSize: '0.875rem', cursor: 'pointer' }}
+            className="form-select"
+            style={{ width: 'auto', minWidth: 150, padding: '8px 12px', fontSize: '0.875rem', cursor: 'pointer' }}
             value={filterSource}
             onChange={(e) => { setFilterSource(e.target.value); setPage(1); }}
             id="all-leads-filter-source"
@@ -225,6 +238,23 @@ export default function AllLeadsPage() {
               <option key={s.id} value={String(s.id)}>{s.name}</option>
             ))}
           </select>
+
+          {/* Assigned Rep Filter */}
+          {isManagerOrAdmin && (
+            <select
+              className="form-select"
+              style={{ width: 'auto', minWidth: 150, padding: '8px 12px', fontSize: '0.875rem', cursor: 'pointer' }}
+              value={filterRep}
+              onChange={(e) => { setFilterRep(e.target.value); setPage(1); }}
+              id="all-leads-filter-rep"
+            >
+              <option value="">All Reps</option>
+              <option value="unassigned">Unassigned</option>
+              {reps.map((r) => (
+                <option key={r.id} value={String(r.id)}>{r.name}</option>
+              ))}
+            </select>
+          )}
 
           {/* Clear Filters */}
           {hasActiveFilters && (
