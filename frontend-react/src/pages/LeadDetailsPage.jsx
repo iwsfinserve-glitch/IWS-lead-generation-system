@@ -311,8 +311,8 @@ export default function LeadDetailsPage() {
       <Navbar title="Lead Details" />
       <div className="page-container">
         {/* Back */}
-        <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={() => navigate('/leads')} id="lead-details-back-btn">
-          <ArrowLeft size={14} /> Back to All Leads
+        <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={() => navigate(-1)} id="lead-details-back-btn">
+          <ArrowLeft size={14} /> Back
         </button>
 
         {/* Header */}
