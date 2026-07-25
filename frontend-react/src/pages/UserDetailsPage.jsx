@@ -4,8 +4,8 @@ import { ArrowLeft, Edit, Trash2 } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import { getUser, deleteUser } from '../api/usersApi';
 import { getLeads, getLeadsSummary } from '../api/leadsApi';
-import { getTasks } from '../api/tasksApi';
-import { getAppointments } from '../api/appointmentsApi';
+import { getTasks, deleteTask } from '../api/tasksApi';
+import { getAppointments, deleteAppointment } from '../api/appointmentsApi';
 import { RoleBadge } from '../components/common/StatusBadge';
 import LeadCard from '../components/cards/LeadCard';
 import ManageUserModal from '../components/modals/ManageUserModal';
@@ -54,6 +54,28 @@ export default function UserDetailsPage() {
       navigate('/users');
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to delete user');
+    }
+  };
+
+  const handleDeleteTask = async (taskId, taskTitle) => {
+    if (!window.confirm(`Are you sure you want to delete task "${taskTitle}"?`)) return;
+    try {
+      await deleteTask(taskId);
+      toast.success('Task deleted successfully');
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete task');
+    }
+  };
+
+  const handleDeleteAppointment = async (apptId, apptTitle) => {
+    if (!window.confirm(`Are you sure you want to delete appointment "${apptTitle}"?`)) return;
+    try {
+      await deleteAppointment(apptId);
+      toast.success('Appointment deleted successfully');
+      setAppts((prev) => prev.filter((a) => a.id !== apptId));
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete appointment');
     }
   };
 
@@ -154,11 +176,23 @@ export default function UserDetailsPage() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {tasks.map((t) => (
-                <div key={t.id} className="glass-card" style={{ padding: '14px 16px', borderLeft: `3px solid ${t.status === 'completed' ? 'var(--success)' : 'var(--primary)'}` }}>
-                  <div style={{ fontWeight: 700, marginBottom: 4 }}>{t.title}</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                    {t.status === 'completed' ? '✅ Completed' : '⏳ Pending'} · Due: {t.due || 'N/A'} · {t.lead_name}
+                <div key={t.id} className="glass-card" style={{ padding: '14px 16px', borderLeft: `3px solid ${t.status === 'completed' ? 'var(--success)' : 'var(--primary)'}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>{t.title}</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      {t.status === 'completed' ? '✅ Completed' : '⏳ Pending'} · Due: {t.end_time ? new Date(t.end_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : (t.due || 'N/A')} {t.lead_name ? `· ${t.lead_name}` : ''}
+                    </div>
                   </div>
+                  {isAdmin && (
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => handleDeleteTask(t.id, t.title)}
+                      id={`user-details-delete-task-${t.id}`}
+                      title="Delete Task"
+                    >
+                      <Trash2 size={14} /> Delete
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -172,11 +206,23 @@ export default function UserDetailsPage() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {appts.map((a) => (
-                <div key={a.id} className="glass-card" style={{ padding: '14px 16px' }}>
-                  <div style={{ fontWeight: 700, marginBottom: 4 }}>{a.title}</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                    {new Date(a.start_time).toLocaleDateString()} · {a.lead_name} · {a.mode?.replace('_',' ')}
+                <div key={a.id} className="glass-card" style={{ padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>{a.title}</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      {new Date(a.start_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })} · {a.lead_name || `Lead #${a.lead_id}`} · {a.mode?.replace('_',' ')}
+                    </div>
                   </div>
+                  {isAdmin && (
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => handleDeleteAppointment(a.id, a.title)}
+                      id={`user-details-delete-appt-${a.id}`}
+                      title="Delete Appointment"
+                    >
+                      <Trash2 size={14} /> Delete
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

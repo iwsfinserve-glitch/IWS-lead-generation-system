@@ -48,6 +48,14 @@ class TestListAppointments:
         resp = await client.get("/api/v1/appointments/")
         assert resp.status_code == 401
 
+    async def test_manager_only_sees_own_appointments_when_no_user_id(self, client, admin_token, manager_token, appointment_payload):
+        # Admin creates appointment (assigned to admin)
+        await client.post("/api/v1/appointments/", json=appointment_payload, headers=auth_headers(admin_token))
+        # Manager lists appointments with no filters -> should see none
+        resp = await client.get("/api/v1/appointments/", headers=auth_headers(manager_token))
+        assert resp.status_code == 200
+        assert len(resp.json()) == 0
+
 
 class TestCreateAppointment:
     async def test_admin_can_create_appointment(

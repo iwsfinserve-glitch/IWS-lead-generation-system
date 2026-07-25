@@ -23,12 +23,14 @@ async def list_appointments(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List appointments. Sales reps see only their own. Optional ?status= filter."""
+    """List appointments. When user_id is not provided, users see only their own appointments."""
     query = select(Appointment)
     if current_user.role.value == "sales_rep":
         query = query.where(Appointment.user_id == current_user.id)
     elif user_id is not None:
         query = query.where(Appointment.user_id == user_id)
+    elif lead_id is None:
+        query = query.where(Appointment.user_id == current_user.id)
     if lead_id:
         query = query.where(Appointment.lead_id == lead_id)
     if status:
@@ -151,10 +153,15 @@ async def delete_appointment(
         event_metadata={"appointment_id": appointment.id, "title": appointment.title},
     ))
     google_event_id = appointment.google_event_id
+    owner = current_user
+    if appointment.user_id != current_user.id:
+        owner_res = await db.execute(select(User).where(User.id == appointment.user_id))
+        owner = owner_res.scalar_one_or_none() or current_user
+
     await db.delete(appointment)
     await db.commit()
 
-    if current_user.google_refresh_token and google_event_id:
+    if owner.google_refresh_token and google_event_id:
         from app.services.google_sync import delete_calendar_event
-        background_tasks.add_task(delete_calendar_event, current_user, google_event_id)
+        background_tasks.add_task(delete_calendar_event, owner, google_event_id)
     background_tasks.add_task(trigger_ai_analysis_background, appointment.lead_id)

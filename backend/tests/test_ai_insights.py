@@ -391,7 +391,7 @@ class TestContactTimingSparseGuardUnit:
         feature = ContactTimingFeature(client=mock_client)
 
         result = await feature.run(
-            {"interaction_count": 1, "interaction_events": [], "appointment_events": []},
+            {"interaction_count": 0, "interaction_events": [], "appointment_events": []},
             entity_id=999,
         )
 

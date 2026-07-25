@@ -5,7 +5,7 @@ Task routes — CRUD with background Google Tasks sync.
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Query
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -56,12 +56,14 @@ async def list_tasks(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List tasks. Sales reps see only tasks assigned to them."""
+    """List tasks. When user_id is not provided, users see only tasks created by or assigned to them."""
     query = select(Task)
     if current_user.is_sales_rep:
         query = query.where(Task.user_id == current_user.id)
     elif user_id is not None:
         query = query.where(Task.user_id == user_id)
+    else:
+        query = query.where(or_(Task.user_id == current_user.id, Task.assigned_by == current_user.id))
     query = query.order_by(Task.assigned_on.desc()).offset(skip).limit(limit)
     result = await db.execute(query)
     return [TaskRead.from_orm_task(t) for t in result.scalars().all()]
@@ -187,9 +189,14 @@ async def delete_task(
         raise HTTPException(status_code=403, detail="You can only delete your own tasks")
 
     google_task_id = task.google_task_id
+    owner = current_user
+    if task.user_id != current_user.id:
+        owner_res = await db.execute(select(User).where(User.id == task.user_id))
+        owner = owner_res.scalar_one_or_none() or current_user
+
     await db.delete(task)
     await db.commit()
 
-    if current_user.google_refresh_token and google_task_id:
-        background_tasks.add_task(delete_google_task, current_user, google_task_id)
+    if owner.google_refresh_token and google_task_id:
+        background_tasks.add_task(delete_google_task, owner, google_task_id)
 

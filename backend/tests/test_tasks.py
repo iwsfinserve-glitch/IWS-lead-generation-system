@@ -47,6 +47,12 @@ class TestListTasks:
         resp = await client.get("/api/v1/tasks/")
         assert resp.status_code == 401
 
+    async def test_manager_list_tasks_only_sees_own_when_no_user_id(self, client, manager_token, admin_token, task_payload):
+        await client.post("/api/v1/tasks/", json=task_payload, headers=auth_headers(admin_token))
+        resp = await client.get("/api/v1/tasks/", headers=auth_headers(manager_token))
+        assert resp.status_code == 200
+        assert len(resp.json()) == 0
+
 
 class TestCreateTask:
     async def test_admin_can_create_task(self, client, admin_token, task_payload):
@@ -61,7 +67,8 @@ class TestCreateTask:
         assert body["status"] == "needsAction"
         assert "id" in body
 
-    async def test_manager_can_create_task(self, client, manager_token, task_payload):
+    async def test_manager_can_create_task(self, client, manager_token, task_payload, manager_user):
+        task_payload["user_id"] = manager_user.id
         resp = await client.post(
             "/api/v1/tasks/",
             json=task_payload,
@@ -69,7 +76,8 @@ class TestCreateTask:
         )
         assert resp.status_code == 201
 
-    async def test_sales_rep_cannot_create_task(self, client, sales_rep_token, task_payload):
+    async def test_sales_rep_cannot_create_task_for_others(self, client, sales_rep_token, task_payload, admin_user):
+        task_payload["user_id"] = admin_user.id
         resp = await client.post(
             "/api/v1/tasks/",
             json=task_payload,
