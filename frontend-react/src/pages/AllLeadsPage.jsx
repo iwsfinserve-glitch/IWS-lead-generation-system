@@ -9,6 +9,7 @@ import BulkAssignModal from '../components/modals/BulkAssignModal';
 import { getLeads, claimLead, getLeadsSummary, bulkDeleteLeads, getSources } from '../api/leadsApi';
 import { getLeadTransferRequests, updateLeadTransfer, getUsers } from '../api/usersApi';
 import { useAuth } from '../context/AuthContext';
+import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
 const PAGE_SIZE = 15;
@@ -31,7 +32,32 @@ export default function AllLeadsPage() {
   const { isManagerOrAdmin, isAdmin, isManager, user } = useAuth();
   const TABS = isAdmin ? TABS_ADMIN : isManager ? TABS_MANAGER : TABS_REP;
 
-  const [tab, setTab]             = useState('All Leads');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab          = searchParams.get('tab') || 'All Leads';
+  const search       = searchParams.get('search') || '';
+  const filterStatus = searchParams.get('status') || '';
+  const filterSource = searchParams.get('source') || '';
+  const filterRep    = searchParams.get('rep') || '';
+  const pageParam    = parseInt(searchParams.get('page') || '1', 10);
+  const page         = isNaN(pageParam) ? 1 : pageParam;
+
+  const updateParams = (newParams) => {
+    const current = Object.fromEntries(searchParams.entries());
+    Object.keys(newParams).forEach(k => {
+      if (newParams[k] === '' || newParams[k] === null || newParams[k] === undefined) {
+        delete current[k];
+      } else {
+        current[k] = newParams[k];
+      }
+    });
+    setSearchParams(current, { replace: true });
+  };
+  const setTab = (val) => updateParams({ tab: val, page: 1 });
+  const setSearch = (val) => updateParams({ search: val, page: 1 });
+  const setFilterStatus = (val) => updateParams({ status: val, page: 1 });
+  const setFilterSource = (val) => updateParams({ source: val, page: 1 });
+  const setFilterRep = (val) => updateParams({ rep: val, page: 1 });
+  const setPage = (val) => updateParams({ page: val });
   const [leads, setLeads]         = useState([]);
   const [summary, setSummary]     = useState({});
   const [transfers, setTransfers] = useState([]);
@@ -42,11 +68,6 @@ export default function AllLeadsPage() {
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [showBulkAssign, setShowBulkAssign] = useState(false);
   const [selectedLeadIds, setSelectedLeadIds] = useState(new Set());
-  const [search, setSearch]       = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
-  const [filterSource, setFilterSource] = useState('');
-  const [filterRep, setFilterRep]       = useState('');
-  const [page, setPage]           = useState(1);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -110,11 +131,7 @@ export default function AllLeadsPage() {
   };
 
   const resetFilters = () => {
-    setSearch('');
-    setFilterStatus('');
-    setFilterSource('');
-    setFilterRep('');
-    setPage(1);
+    updateParams({ search: '', status: '', source: '', rep: '', page: 1 });
   };
 
   const hasActiveFilters = search.trim() || filterStatus || filterSource || filterRep;

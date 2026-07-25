@@ -8,7 +8,7 @@ import { getAppointments } from '../api/appointmentsApi';
 import { getTasks } from '../api/tasksApi';
 import { getUsers } from '../api/usersApi';
 import { Users, Target, CheckSquare, TrendingUp, Plus, ChevronRight, Search, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import CreateLeadModal from '../components/modals/CreateLeadModal';
 import ManageUserModal from '../components/modals/ManageUserModal';
@@ -27,10 +27,25 @@ function SalesRepDashboard() {
   const [tasks, setTasks]           = useState([]);
   const [loading, setLoading]       = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  const [leadSearch, setLeadSearch] = useState('');
-  const [leadStatus, setLeadStatus] = useState('');
-  const [leadSource, setLeadSource] = useState('');
-  const [leadRep, setLeadRep]       = useState('');
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const leadSearch = searchParams.get('search') || '';
+  const leadStatus = searchParams.get('status') || '';
+  const leadSource = searchParams.get('source') || '';
+  const leadRep    = searchParams.get('rep') || '';
+
+  const updateParams = (newParams) => {
+    const current = Object.fromEntries(searchParams.entries());
+    Object.keys(newParams).forEach(k => {
+      if (!newParams[k]) delete current[k];
+      else current[k] = newParams[k];
+    });
+    setSearchParams(current, { replace: true });
+  };
+  const setLeadSearch = (val) => updateParams({ search: val });
+  const setLeadStatus = (val) => updateParams({ status: val });
+  const setLeadSource = (val) => updateParams({ source: val });
+  const setLeadRep    = (val) => updateParams({ rep: val });
 
   useEffect(() => {
     Promise.all([
@@ -231,10 +246,25 @@ function ManagerDashboard() {
   const [teamSize, setTeamSize]     = useState(0);
   const [loading, setLoading]       = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  const [leadSearch, setLeadSearch] = useState('');
-  const [leadStatus, setLeadStatus] = useState('');
-  const [leadSource, setLeadSource] = useState('');
-  const [leadRep, setLeadRep]       = useState('');
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const leadSearch = searchParams.get('search') || '';
+  const leadStatus = searchParams.get('status') || '';
+  const leadSource = searchParams.get('source') || '';
+  const leadRep    = searchParams.get('rep') || '';
+
+  const updateParams = (newParams) => {
+    const current = Object.fromEntries(searchParams.entries());
+    Object.keys(newParams).forEach(k => {
+      if (!newParams[k]) delete current[k];
+      else current[k] = newParams[k];
+    });
+    setSearchParams(current, { replace: true });
+  };
+  const setLeadSearch = (val) => updateParams({ search: val });
+  const setLeadStatus = (val) => updateParams({ status: val });
+  const setLeadSource = (val) => updateParams({ source: val });
+  const setLeadRep    = (val) => updateParams({ rep: val });
 
   useEffect(() => {
     Promise.all([
