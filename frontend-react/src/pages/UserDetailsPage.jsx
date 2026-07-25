@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit, Trash2 } from 'lucide-react';
+import { ArrowLeft, Calendar, CheckSquare, Edit, Target, Trash2 } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import { getUser, deleteUser } from '../api/usersApi';
 import { getLeads, getLeadsSummary } from '../api/leadsApi';
@@ -119,9 +119,9 @@ export default function UserDetailsPage() {
               <RoleBadge role={user.role} />
             </div>
             <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>📧 {user.email}</div>
-              {user.phone_number && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>📞 {user.phone_number}</div>}
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>📊 {leads.length} leads · {pendingTasks} pending tasks · {doneTasks} tasks done</div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{user.email}</div>
+              {user.phone_number && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{user.phone_number}</div>}
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{leads.length} leads · {pendingTasks} pending tasks · {doneTasks} tasks done</div>
             </div>
           </div>
           {isAdmin && (
@@ -161,7 +161,7 @@ export default function UserDetailsPage() {
         {/* Leads tab */}
         {tab === 'leads' && (
           leads.length === 0 ? (
-            <div className="empty-state"><div className="empty-state-icon">🎯</div><div className="empty-state-title">No leads assigned</div></div>
+            <div className="empty-state"><div className="empty-state-icon"><Target size={48} /></div><div className="empty-state-title">No leads assigned</div></div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {leads.map((l) => <LeadCard key={l.id} lead={l} />)}
@@ -172,7 +172,7 @@ export default function UserDetailsPage() {
         {/* Tasks tab */}
         {tab === 'tasks' && (
           tasks.length === 0 ? (
-            <div className="empty-state"><div className="empty-state-icon">✅</div><div className="empty-state-title">No tasks</div></div>
+            <div className="empty-state"><div className="empty-state-icon"><CheckSquare size={48} /></div><div className="empty-state-title">No tasks</div></div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {tasks.map((t) => (
@@ -180,7 +180,7 @@ export default function UserDetailsPage() {
                   <div>
                     <div style={{ fontWeight: 700, marginBottom: 4 }}>{t.title}</div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      {t.status === 'completed' ? '✅ Completed' : '⏳ Pending'} · Due: {t.end_time ? new Date(t.end_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : (t.due || 'N/A')} {t.lead_name ? `· ${t.lead_name}` : ''}
+                      {t.status === 'completed' ? 'Completed' : 'Pending'} · Due: {t.end_time ? new Date(t.end_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : (t.due || 'N/A')} {t.lead_name ? `· ${t.lead_name}` : ''}
                     </div>
                   </div>
                   {isAdmin && (
@@ -202,7 +202,7 @@ export default function UserDetailsPage() {
         {/* Appointments tab */}
         {tab === 'appts' && (
           appts.length === 0 ? (
-            <div className="empty-state"><div className="empty-state-icon">📅</div><div className="empty-state-title">No appointments</div></div>
+            <div className="empty-state"><div className="empty-state-icon"><Calendar size={48} /></div><div className="empty-state-title">No appointments</div></div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {appts.map((a) => (

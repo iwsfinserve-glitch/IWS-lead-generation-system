@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
+import { AlertCircle, Calendar, CheckCircle2, CheckSquare, Clock, Plus, User } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import Pagination from '../components/common/Pagination';
 import CreateTaskModal from '../components/modals/CreateTaskModal';
@@ -33,10 +33,10 @@ function TaskCard({ task, onComplete, onExtend, onApproveExt, onRejectExt, isMan
           {formattedEndTime ? (
             <span>⏰ End: {formattedEndTime}</span>
           ) : task.due ? (
-            <span>📅 Due: {task.due}</span>
+            <span style={{display:'flex', gap:4, alignItems:'center'}}><Calendar size={14}/> Due: {task.due}</span>
           ) : null}
-          {task.user_name  && <span>🧑 {task.user_name}</span>}
-          {task.assigned_by_name && <span>👤 Assigned by: {task.assigned_by_name}</span>}
+          {task.user_name  && <span style={{display:'flex', gap:4, alignItems:'center'}}><User size={14}/> {task.user_name}</span>}
+          {task.assigned_by_name && <span style={{display:'flex', gap:4, alignItems:'center'}}><User size={14}/> Assigned by: {task.assigned_by_name}</span>}
         </div>
         {task.notes && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 6, fontStyle: 'italic' }}>{task.notes}</div>}
       </div>
@@ -191,7 +191,7 @@ export default function TasksPage() {
         ) : tab === 'extensions' ? (
           extReqs.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-state-icon">✅</div>
+              <div className="empty-state-icon"><CheckSquare size={48} /></div>
               <div className="empty-state-title">No pending extension requests</div>
             </div>
           ) : (
@@ -201,7 +201,7 @@ export default function TasksPage() {
           )
         ) : paginated.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon">✅</div>
+            <div className="empty-state-icon"><CheckSquare size={48} /></div>
             <div className="empty-state-title">No {tab} tasks</div>
           </div>
         ) : (

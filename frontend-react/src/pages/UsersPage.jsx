@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/layout/Navbar';
 import { RoleBadge } from '../components/common/StatusBadge';
@@ -97,7 +97,7 @@ export default function UsersPage() {
           <div className="loading-center"><div className="spinner" /> Loading users…</div>
         ) : filtered.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon">👥</div>
+            <div className="empty-state-icon"><Users size={48} /></div>
             <div className="empty-state-title">No users found</div>
           </div>
         ) : (
@@ -126,7 +126,7 @@ export default function UsersPage() {
                     </div>
                   </div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    ✉️ {u.email} {u.phone_number ? ` · 📞 ${u.phone_number}` : ''}
+                    {u.email} {u.phone_number ? ` · ${u.phone_number}` : ''}
                   </div>
                   {isAdmin && (
                     <div style={{ display: 'flex', gap: 8 }} onClick={(e) => e.stopPropagation()}>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Calendar as CalIcon, List, CheckCircle, ExternalLink, RefreshCw, Unlink } from 'lucide-react';
+import { Calendar, Calendar as CalIcon, CheckCircle, ExternalLink, List, MapPin, Plus, RefreshCw, Unlink, User, X } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import Pagination from '../components/common/Pagination';
 import ScheduleAppointmentModal from '../components/modals/ScheduleAppointmentModal';
@@ -110,9 +110,9 @@ function ApptCard({ appt, onMarkComplete }) {
           <span style={{ padding: '2px 8px', borderRadius: 12, fontSize: '0.7rem', fontWeight: 700, background: m.bg, color: m.color }}>{m.label}</span>
         </div>
         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <span>📅 {start.toLocaleDateString()} {start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – {end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-          {appt.lead_name && <span>👤 {appt.lead_name}</span>}
-          {appt.location && <span>📍 {appt.location}</span>}
+          <span style={{display:'flex', gap:4, alignItems:'center'}}><Calendar size={14}/> {start.toLocaleDateString()} {start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – {end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+          {appt.lead_name && <span style={{display:'flex', gap:4, alignItems:'center'}}><User size={14}/> {appt.lead_name}</span>}
+          {appt.location && <span style={{display:'flex', gap:4, alignItems:'center'}}><MapPin size={14}/> {appt.location}</span>}
         </div>
         {appt.note && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 6, fontStyle: 'italic' }}>{appt.note}</div>}
       </div>
@@ -133,7 +133,7 @@ function DayDetailPanel({ date, appts, onClose }) {
       <div style={{ background: 'var(--bg-card-solid)', border: '1px solid var(--border)', borderRadius: 16, padding: 28, width: '100%', maxWidth: 480, maxHeight: '80vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <h3 style={{ margin: 0 }}>{new Date(date + 'T00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</h3>
-          <button className="btn btn-ghost btn-icon" onClick={onClose} id="day-detail-close">✕</button>
+          <button className="btn btn-ghost btn-icon" onClick={onClose} id="day-detail-close"><X size={14} /></button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {appts.map((a) => (
@@ -254,7 +254,7 @@ export default function AppointmentsPage() {
             {googleStatus.google_connected ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <span style={{ padding: '6px 12px', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 8, fontSize: '0.8rem', color: '#34d399', fontWeight: 600 }}>
-                  ✓ Google Calendar Synced
+                  Google Calendar Synced
                 </span>
                 <button className="btn btn-ghost btn-sm" onClick={handleGoogleSync} disabled={syncing} id="google-sync-btn" title="Sync now">
                   <RefreshCw size={14} style={syncing ? { animation: 'spin 0.7s linear infinite' } : {}} />
@@ -303,7 +303,7 @@ export default function AppointmentsPage() {
 
             {paginated.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-state-icon">📅</div>
+                <div className="empty-state-icon"><Calendar size={48} /></div>
                 <div className="empty-state-title">No appointments here</div>
               </div>
             ) : (

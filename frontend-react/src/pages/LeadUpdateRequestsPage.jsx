@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, XCircle, ArrowLeft, Clock, User, FileEdit } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Clock, FileEdit, User, XCircle } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import { getLeadUpdateRequests, resolveLeadUpdateRequest } from '../api/leadsApi';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 
 const STATUS_STYLE = {
-  pending:  { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.35)', label: '⏳ Pending' },
-  approved: { color: '#22c55e', bg: 'rgba(34,197,94,0.12)',  border: 'rgba(34,197,94,0.35)',  label: '✅ Approved' },
-  rejected: { color: '#ef4444', bg: 'rgba(239,68,68,0.12)',  border: 'rgba(239,68,68,0.35)',  label: '❌ Rejected' },
+  pending:  { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.35)', label: 'Pending' },
+  approved: { color: '#22c55e', bg: 'rgba(34,197,94,0.12)',  border: 'rgba(34,197,94,0.35)',  label: 'Approved' },
+  rejected: { color: '#ef4444', bg: 'rgba(239,68,68,0.12)',  border: 'rgba(239,68,68,0.35)',  label: 'Rejected' },
 };
 
 function DiffRow({ label, current, proposed }) {
@@ -78,7 +78,7 @@ export default function LeadUpdateRequestsPage() {
     setResolving(reqId);
     try {
       await resolveLeadUpdateRequest(reqId, { status: action });
-      toast.success(action === 'approved' ? '✅ Request approved — lead updated!' : '❌ Request rejected.');
+      toast.success(action === 'approved' ? 'Request approved — lead updated!' : 'Request rejected.');
       load();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to resolve request');

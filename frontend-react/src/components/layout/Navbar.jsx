@@ -1,14 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, CheckCheck, Menu } from 'lucide-react';
+import { Bell, CheckCheck, Menu, Moon, Sun } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { getNotifications, getUnreadCount, markNotificationRead, markAllRead } from '../../api/notificationsApi';
+import { useTheme } from '../../context/ThemeContext';
 
 export default function Navbar({ title }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const outletCtx = useOutletContext?.() || {};
   const toggleSidebar = outletCtx.toggleSidebar;
+  const { theme, toggleTheme } = useTheme();
 
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
@@ -101,6 +103,13 @@ export default function Navbar({ title }) {
       </div>
 
       <div className="navbar-actions" style={{ position: 'relative' }} ref={dropdownRef}>
+        <button
+          className="btn btn-ghost btn-icon"
+          onClick={toggleTheme}
+          title="Toggle Theme"
+        >
+          {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+        </button>
         <button
           className="btn btn-ghost btn-icon"
           id="navbar-notifications-btn"
@@ -210,8 +219,8 @@ export default function Navbar({ title }) {
           </div>
         )}
 
-        <div style={{ width: 1, height: 24, background: 'var(--border)' }} />
-        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.2)' }} />
+        <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.8)', whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {user?.name}
         </div>
       </div>

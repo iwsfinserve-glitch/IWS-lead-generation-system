@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Phone, Mail, MapPin, User, Calendar, Edit, Trash2, Zap, Lock } from 'lucide-react';
+import { ArrowLeft, Calendar, Edit, Lock, Mail, MapPin, Phone, Trash2, User, Zap } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import { StatusBadge, STATUS_DISPLAY, STATUS_COLOR } from '../components/common/StatusBadge';
 import { getLead, getLeadTimeline, addTimelineNote, updateTimelineNote, updateLead, deleteLead, claimLead, getSalesReps, getLeadUpdateRequests } from '../api/leadsApi';
@@ -14,10 +14,10 @@ import CreateTaskModal from '../components/modals/CreateTaskModal';
 import LeadUpdateRequestModal from '../components/modals/LeadUpdateRequestModal';
 
 const EVENT_STYLES = {
-  status_change:      { border: '#2196F3', bg: 'rgba(33,150,243,0.07)', icon: '🔄' },
-  note:               { border: '#4CAF50', bg: 'rgba(76,175,80,0.07)',  icon: '📝' },
-  lead_created:       { border: '#9C27B0', bg: 'rgba(156,39,176,0.07)', icon: '✨' },
-  appointment_booked: { border: '#FF9800', bg: 'rgba(255,152,0,0.07)',  icon: '📅' },
+  status_change:      { border: '#2196F3', bg: 'rgba(33,150,243,0.07)', icon: 'Refresh' },
+  note:               { border: '#4CAF50', bg: 'rgba(76,175,80,0.07)',  icon: 'Note' },
+  lead_created:       { border: '#9C27B0', bg: 'rgba(156,39,176,0.07)', icon: 'New' },
+  appointment_booked: { border: '#FF9800', bg: 'rgba(255,152,0,0.07)',  icon: 'Appt' },
 };
 
 const ALL_STATUSES = [
@@ -467,9 +467,9 @@ export default function LeadDetailsPage() {
               <div className="glass-card" style={{ padding: 20, marginBottom: 20 }}>
                 {(!lead.assigned_rep_id || lead.status === 'unassigned') ? (
                   <div style={{ textAlign: 'center' }}>
-                    <div style={{ color: 'var(--warning)', fontWeight: 700, fontSize: '1rem', marginBottom: 8 }}>⚡ Unassigned Lead</div>
+                    <div style={{ color: 'var(--warning)', fontWeight: 700, fontSize: '1rem', marginBottom: 8 }}>Unassigned Lead</div>
                     <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: 14 }}>Claim it to assign it to yourself and begin working.</p>
-                    <button className="btn btn-primary btn-full" onClick={handleClaim} id="lead-claim-btn">⚡ Claim This Lead</button>
+                    <button className="btn btn-primary btn-full" onClick={handleClaim} id="lead-claim-btn">Claim This Lead</button>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>

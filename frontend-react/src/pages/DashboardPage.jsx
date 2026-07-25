@@ -566,7 +566,7 @@ export default function DashboardPage() {
       <Navbar title="Dashboard" />
       <div className="page-container">
         <div style={{ marginBottom: 28 }}>
-          <h1 style={{ marginBottom: 4 }}>{greeting()}, {user?.name?.split(' ')[0]} 👋</h1>
+          <h1 style={{ marginBottom: 4 }}>{greeting()}, {user?.name?.split(' ')[0]}</h1>
           <p style={{ color: 'var(--text-muted)' }}>Here's what's happening with your leads today.</p>
         </div>
 

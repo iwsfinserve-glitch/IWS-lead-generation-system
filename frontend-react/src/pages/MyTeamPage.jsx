@@ -5,7 +5,7 @@ import MetricCard from '../components/common/MetricCard';
 import { RoleBadge } from '../components/common/StatusBadge';
 import { getUsers } from '../api/usersApi';
 import { getLeads, getLeadsSummary } from '../api/leadsApi';
-import { Users, Target, TrendingUp, CheckSquare, ChevronRight } from 'lucide-react';
+import { CheckSquare, ChevronRight, Target, TrendingUp, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
@@ -70,7 +70,7 @@ export default function MyTeamPage() {
 
         {teamMembers.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon">👥</div>
+            <div className="empty-state-icon"><Users size={48} /></div>
             <div className="empty-state-title">No direct reports yet</div>
             <div className="empty-state-desc">Sales reps assigned to you will appear here.</div>
           </div>

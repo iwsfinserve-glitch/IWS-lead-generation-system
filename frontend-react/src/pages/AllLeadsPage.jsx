@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Search, Plus, X } from 'lucide-react';
+import { CheckSquare, Plus, Search, Target, X } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import LeadCard from '../components/cards/LeadCard';
 import Pagination from '../components/common/Pagination';
@@ -325,7 +325,7 @@ export default function AllLeadsPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {transfers.filter((r) => r.status === 'pending').length === 0 ? (
               <div className="empty-state">
-                <div className="empty-state-icon">✅</div>
+                <div className="empty-state-icon"><CheckSquare size={48} /></div>
                 <div className="empty-state-title">No pending transfer requests</div>
               </div>
             ) : transfers.filter((r) => r.status === 'pending').map((r) => (
@@ -350,7 +350,7 @@ export default function AllLeadsPage() {
               <div className="loading-center"><div className="spinner" /> Loading leads…</div>
             ) : filtered.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-state-icon">🎯</div>
+                <div className="empty-state-icon"><Target size={48} /></div>
                 <div className="empty-state-title">No leads found</div>
                 <p>Try adjusting your search or filters.</p>
               </div>

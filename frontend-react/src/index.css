@@ -2,11 +2,11 @@
 
 /* ── CSS Custom Properties (Design Tokens) ── */
 :root {
-  /* Colors */
-  --primary: #6366f1;
-  --primary-dark: #4f46e5;
-  --primary-light: #818cf8;
-  --primary-glow: rgba(99, 102, 241, 0.15);
+  /* Colors - Light Theme */
+  --primary: #273878;
+  --primary-dark: #1b2654;
+  --primary-light: #4459a8;
+  --primary-glow: rgba(39, 56, 120, 0.15);
 
   --accent: #0ea5e9;
   --accent-dark: #0284c7;
@@ -15,43 +15,66 @@
   --danger: #ef4444;
   --danger-dark: #dc2626;
 
-  /* Neutral */
-  --bg: #0f1117;
-  --bg-card: rgba(30, 32, 44, 0.85);
-  --bg-card-solid: #1e202c;
-  --bg-hover: rgba(99, 102, 241, 0.08);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-focus: rgba(99, 102, 241, 0.5);
+  /* Neutral - Light Theme */
+  --bg: #f8fafc;
+  --bg-card: rgba(255, 255, 255, 0.95);
+  --bg-card-solid: #ffffff;
+  --bg-hover: rgba(39, 56, 120, 0.08);
+  --border: rgba(0, 0, 0, 0.1);
+  --border-focus: rgba(39, 56, 120, 0.5);
 
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
+  --text-primary: #0f1117;
+  --text-secondary: #475569;
   --text-muted: #64748b;
-  --text-inverse: #0f1117;
+  --text-inverse: #f1f5f9;
 
-  /* Sidebar */
+  /* Sidebar - Light Theme */
   --sidebar-width: 240px;
-  --sidebar-bg: rgba(15, 17, 23, 0.95);
-  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-bg: rgba(255, 255, 255, 0.98);
+  --sidebar-border: rgba(0, 0, 0, 0.08);
 
   /* Typography */
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
 
-  /* Spacing */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
-  --radius-xl: 24px;
+  /* Spacing - Minimalistic Rounded */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
 
-  /* Shadows */
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.2);
-  --shadow-lg: 0 10px 30px rgba(0,0,0,0.5), 0 4px 8px rgba(0,0,0,0.3);
-  --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.2);
+  /* Shadows - Light Theme */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+  --shadow-glow: 0 0 20px rgba(39, 56, 120, 0.2);
 
   /* Transitions */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme='dark'] {
+  /* Neutral - Dark Theme */
+  --bg: #0f1117;
+  --bg-card: rgba(30, 32, 44, 0.85);
+  --bg-card-solid: #1e202c;
+  --bg-hover: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.08);
+  
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-inverse: #0f1117;
+
+  /* Sidebar - Dark Theme */
+  --sidebar-bg: rgba(15, 17, 23, 0.95);
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+
+  /* Shadows - Dark Theme */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.2);
+  --shadow-lg: 0 10px 30px rgba(0,0,0,0.5), 0 4px 8px rgba(0,0,0,0.3);
 }
 
 /* ── Global Reset ── */
@@ -83,8 +106,8 @@ body::before {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
   background:
-    radial-gradient(ellipse 60% 40% at 70% 10%, rgba(99,102,241,0.08) 0%, transparent 60%),
-    radial-gradient(ellipse 50% 40% at 20% 80%, rgba(14,165,233,0.06) 0%, transparent 60%);
+    radial-gradient(ellipse 60% 40% at 70% 10%, var(--primary-glow) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 40% at 20% 80%, rgba(14, 165, 233, 0.06) 0%, transparent 60%);
   pointer-events: none;
   z-index: 0;
 }
@@ -149,7 +172,7 @@ a:hover { color: var(--primary); }
 }
 .glass-card:hover {
   box-shadow: var(--shadow-lg);
-  border-color: rgba(99,102,241,0.2);
+  border-color: var(--primary);
 }
 
 /* ── Buttons ── */
@@ -175,13 +198,13 @@ a:hover { color: var(--primary); }
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+  background: var(--primary);
   color: #fff;
-  box-shadow: 0 2px 8px rgba(99,102,241,0.3);
+  box-shadow: 0 2px 8px rgba(39,56,120,0.3);
 }
 .btn-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, var(--primary-dark) 0%, #3730a3 100%);
-  box-shadow: 0 4px 14px rgba(99,102,241,0.4);
+  background: var(--primary-dark);
+  box-shadow: 0 4px 14px rgba(39,56,120,0.4);
   transform: translateY(-1px);
 }
 .btn-primary:active { transform: translateY(0); }
@@ -197,11 +220,12 @@ a:hover { color: var(--primary); }
 }
 
 .btn-danger {
-  background: linear-gradient(135deg, var(--danger) 0%, var(--danger-dark) 100%);
+  background: var(--danger);
   color: #fff;
   box-shadow: 0 2px 8px rgba(239,68,68,0.3);
 }
 .btn-danger:hover:not(:disabled) {
+  background: var(--danger-dark);
   box-shadow: 0 4px 14px rgba(239,68,68,0.4);
   transform: translateY(-1px);
 }
@@ -319,6 +343,7 @@ a:hover { color: var(--primary); }
 .metric-card:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-lg);
+  border-color: var(--primary);
 }
 .metric-value {
   font-size: 2.5rem;
@@ -386,8 +411,8 @@ a:hover { color: var(--primary); }
   align-items: center;
 }
 .lead-card:hover {
-  border-color: rgba(99,102,241,0.4);
-  box-shadow: 0 0 0 1px rgba(99,102,241,0.15), var(--shadow-md);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px rgba(39,56,120,0.15), var(--shadow-md);
   transform: translateX(2px);
 }
 .lead-name { font-weight: 700; font-size: 1rem; color: var(--text-primary); }
@@ -513,8 +538,8 @@ a:hover { color: var(--primary); }
 /* ── Navbar ── */
 .navbar {
   padding: 14px 32px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(15,17,23,0.8);
+  border-bottom: none;
+  background: var(--primary);
   backdrop-filter: blur(10px);
   display: flex;
   align-items: center;
@@ -526,12 +551,20 @@ a:hover { color: var(--primary); }
 .navbar-title {
   font-size: 1.1rem;
   font-weight: 700;
-  color: var(--text-primary);
+  color: #ffffff;
 }
 .navbar-actions {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+.navbar .btn-ghost {
+  color: rgba(255, 255, 255, 0.8);
+}
+.navbar .btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border-color: transparent;
 }
 
 /* ── Modal ── */
