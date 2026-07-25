@@ -334,24 +334,52 @@ export default function LeadDetailsPage() {
         </div>
 
         {/* Contact info */}
-        <div className="glass-card" style={{ padding: '18px 20px', marginBottom: 24, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
-          {[
-            { icon: Mail, label: 'Email', value: lead.email },
-            { icon: Phone, label: 'Phone', value: lead.phone_number },
-            { icon: User, label: 'Source', value: lead.source_name },
-            { icon: User, label: 'Assigned Rep', value: lead.assigned_rep_name || 'Unassigned' },
-            { icon: Calendar, label: 'Last Contact', value: lead.last_contact || 'N/A' },
-            { icon: MapPin, label: 'Address', value: lead.address || 'N/A' },
-            { icon: Calendar, label: 'Date of Birth', value: lead.dob || 'N/A' },
-            { icon: User, label: 'Age', value: lead.age !== null ? `${lead.age} years` : 'N/A' },
-          ].map(({ icon: Icon, label, value }) => (
-            <div key={label}>
-              <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)', marginBottom: 4, display: 'flex', gap: 5, alignItems: 'center' }}>
-                <Icon size={12} /> {label}
+        <div className="glass-card" style={{ padding: '18px 20px', marginBottom: 24 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
+            {[
+              { icon: Mail, label: 'Email', value: lead.email },
+              { icon: Phone, label: 'Phone', value: lead.phone_number },
+              { icon: User, label: 'Source', value: lead.source_name },
+              { icon: User, label: 'Assigned Rep', value: lead.assigned_rep_name || 'Unassigned' },
+              { icon: Calendar, label: 'Last Contact', value: lead.last_contact || 'N/A' },
+              { icon: MapPin, label: 'Address', value: lead.address || 'N/A' },
+              { icon: Calendar, label: 'Date of Birth', value: lead.dob || 'N/A' },
+              { icon: User, label: 'Age', value: lead.age !== null ? `${lead.age} years` : 'N/A' },
+            ].map(({ icon: Icon, label, value }) => (
+              <div key={label}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)', marginBottom: 4, display: 'flex', gap: 5, alignItems: 'center' }}>
+                  <Icon size={12} /> {label}
+                </div>
+                <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{value || 'N/A'}</div>
               </div>
-              <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{value || 'N/A'}</div>
+            ))}
+          </div>
+          
+          {/* Sales reps: Request field update button */}
+          {!isManagerOrAdmin && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+              {pendingUpdateReq ? (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '6px 12px', borderRadius: 8,
+                  background: 'rgba(245,158,11,0.12)',
+                  border: '1px solid rgba(245,158,11,0.35)',
+                  fontSize: '0.8rem', color: 'var(--warning)', fontWeight: 600,
+                }}>
+                  ⏳ Update Pending Approval
+                </div>
+              ) : (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setShowUpdateReqModal(true)}
+                  id="lead-request-update-btn"
+                  style={{ borderColor: 'rgba(99,102,241,0.4)', color: 'var(--primary)' }}
+                >
+                  <Edit size={14} /> Edit Lead Info
+                </button>
+              )}
             </div>
-          ))}
+          )}
         </div>
 
         {/* Admin delete/edit */}
@@ -410,31 +438,6 @@ export default function LeadDetailsPage() {
                   <button className="btn btn-secondary btn-sm" onClick={() => setShowTaskModal(true)} id="lead-add-task-btn">
                     <Edit size={14} /> Add Task
                   </button>
-                  {/* Sales reps: Request field update button */}
-                  {!isManagerOrAdmin && (
-                    <>
-                      {pendingUpdateReq ? (
-                        <div style={{
-                          display: 'flex', alignItems: 'center', gap: 6,
-                          padding: '6px 12px', borderRadius: 8,
-                          background: 'rgba(245,158,11,0.12)',
-                          border: '1px solid rgba(245,158,11,0.35)',
-                          fontSize: '0.8rem', color: 'var(--warning)', fontWeight: 600,
-                        }}>
-                          ⏳ Update Pending Approval
-                        </div>
-                      ) : (
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => setShowUpdateReqModal(true)}
-                          id="lead-request-update-btn"
-                          style={{ borderColor: 'rgba(99,102,241,0.4)', color: 'var(--primary)' }}
-                        >
-                          <Edit size={14} /> Request Field Update
-                        </button>
-                      )}
-                    </>
-                  )}
                 </div>
 
                 {/* Transfer */}
