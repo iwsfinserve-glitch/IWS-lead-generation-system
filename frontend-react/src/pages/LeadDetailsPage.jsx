@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Phone, Mail, MapPin, User, Calendar, Edit, Trash2, Zap, Lock } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import { StatusBadge, STATUS_DISPLAY, STATUS_COLOR } from '../components/common/StatusBadge';
-import { getLead, getLeadTimeline, addTimelineNote, updateTimelineNote, updateLead, deleteLead, claimLead, getSalesReps } from '../api/leadsApi';
+import { getLead, getLeadTimeline, addTimelineNote, updateTimelineNote, updateLead, deleteLead, claimLead, getSalesReps, getLeadUpdateRequests } from '../api/leadsApi';
 import { getLeadAIScore, triggerLeadAIScore, getLeadAIContactTiming, triggerLeadAIContactTiming } from '../api/aiApi';
 
 import { createLeadTransfer } from '../api/usersApi';
@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import ScheduleAppointmentModal from '../components/modals/ScheduleAppointmentModal';
 import CreateTaskModal from '../components/modals/CreateTaskModal';
+import LeadUpdateRequestModal from '../components/modals/LeadUpdateRequestModal';
 
 const EVENT_STYLES = {
   status_change:      { border: '#2196F3', bg: 'rgba(33,150,243,0.07)', icon: '🔄' },
@@ -163,8 +164,10 @@ export default function LeadDetailsPage() {
 
   const [showApptModal, setShowApptModal] = useState(false);
   const [showTaskModal, setShowTaskModal] = useState(false);
+  const [showUpdateReqModal, setShowUpdateReqModal] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [pendingUpdateReq, setPendingUpdateReq] = useState(null);
 
   useEffect(() => {
     Promise.all([getLead(id), getLeadTimeline(id)])
@@ -179,6 +182,14 @@ export default function LeadDetailsPage() {
       .finally(() => setLoading(false));
 
     getSalesReps().then(setReps).catch(() => {});
+
+    // Check for pending update requests on this lead (for the badge)
+    getLeadUpdateRequests({ status: 'pending' })
+      .then((reqs) => {
+        const match = reqs.find((r) => String(r.lead_id) === String(id));
+        setPendingUpdateReq(match || null);
+      })
+      .catch(() => {});
   }, [id]);
 
   const canUpdate = user && (isManagerOrAdmin || String(lead?.assigned_rep_id) === String(user.id));
@@ -399,6 +410,31 @@ export default function LeadDetailsPage() {
                   <button className="btn btn-secondary btn-sm" onClick={() => setShowTaskModal(true)} id="lead-add-task-btn">
                     <Edit size={14} /> Add Task
                   </button>
+                  {/* Sales reps: Request field update button */}
+                  {!isManagerOrAdmin && (
+                    <>
+                      {pendingUpdateReq ? (
+                        <div style={{
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          padding: '6px 12px', borderRadius: 8,
+                          background: 'rgba(245,158,11,0.12)',
+                          border: '1px solid rgba(245,158,11,0.35)',
+                          fontSize: '0.8rem', color: 'var(--warning)', fontWeight: 600,
+                        }}>
+                          ⏳ Update Pending Approval
+                        </div>
+                      ) : (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => setShowUpdateReqModal(true)}
+                          id="lead-request-update-btn"
+                          style={{ borderColor: 'rgba(99,102,241,0.4)', color: 'var(--primary)' }}
+                        >
+                          <Edit size={14} /> Request Field Update
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
 
                 {/* Transfer */}
@@ -550,6 +586,18 @@ export default function LeadDetailsPage() {
 
       {showApptModal && <ScheduleAppointmentModal leadId={id} onClose={() => setShowApptModal(false)} onCreated={() => { setShowApptModal(false); toast.success('Appointment booked!'); }} />}
       {showTaskModal && <CreateTaskModal leadId={id} onClose={() => setShowTaskModal(false)} onCreated={() => { setShowTaskModal(false); toast.success('Task added!'); }} />}
+      {showUpdateReqModal && (
+        <LeadUpdateRequestModal
+          lead={lead}
+          onClose={() => setShowUpdateReqModal(false)}
+          onSubmitted={() => {
+            // Refresh pending badge
+            getLeadUpdateRequests({ status: 'pending' })
+              .then((reqs) => setPendingUpdateReq(reqs.find((r) => String(r.lead_id) === String(id)) || null))
+              .catch(() => {});
+          }}
+        />
+      )}
     </>
   );
 }

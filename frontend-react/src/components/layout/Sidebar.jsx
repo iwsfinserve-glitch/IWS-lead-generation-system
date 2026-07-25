@@ -1,10 +1,12 @@
 import { NavLink, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import {
   LayoutDashboard, Users, Users2, Target, Calendar, CheckSquare,
-  BarChart3, LogOut, Zap, X,
+  BarChart3, LogOut, Zap, X, FileEdit,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
+import { getLeadUpdateRequests } from '../../api/leadsApi';
 
 const navItems = [
   { to: '/dashboard',    icon: LayoutDashboard, label: 'Dashboard' },
@@ -31,6 +33,14 @@ const ROLE_LABELS = { admin: 'Admin', manager: 'Manager', sales_rep: 'Sales Rep'
 export default function Sidebar({ isOpen, onClose }) {
   const { user, logout, isAdmin, isManagerOrAdmin } = useAuth();
   const navigate = useNavigate();
+  const [pendingUpdateCount, setPendingUpdateCount] = useState(0);
+
+  useEffect(() => {
+    if (!isManagerOrAdmin) return;
+    getLeadUpdateRequests({ status: 'pending' })
+      .then((reqs) => setPendingUpdateCount(reqs.length))
+      .catch(() => {});
+  }, [isManagerOrAdmin]);
 
   const handleLogout = () => {
     logout();
@@ -124,6 +134,31 @@ export default function Sidebar({ isOpen, onClose }) {
                 {label}
               </NavLink>
             ))}
+            {/* Lead Update Requests */}
+            <NavLink
+              to="/lead-update-requests"
+              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+              onClick={handleNavClick}
+              id="sidebar-lead-update-requests-link"
+            >
+              <FileEdit size={16} className="nav-icon" />
+              Update Requests
+              {pendingUpdateCount > 0 && (
+                <span style={{
+                  marginLeft: 'auto',
+                  minWidth: 20, height: 20,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: 10,
+                  background: 'var(--primary)',
+                  color: '#fff',
+                  fontSize: '0.7rem',
+                  fontWeight: 700,
+                  padding: '0 5px',
+                }}>
+                  {pendingUpdateCount}
+                </span>
+              )}
+            </NavLink>
           </>
         )}
       </nav>

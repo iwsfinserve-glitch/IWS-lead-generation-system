@@ -235,7 +235,23 @@ async def update_lead(
     _check_lead_write_access(lead, current_user)
 
     update_data = payload.model_dump(exclude_unset=True)
+
+    # Sales reps can only change status and last_contact directly.
+    # Sensitive contact fields require a LeadUpdateRequest (manager approval).
+    RESTRICTED_FIELDS = {"email", "phone_number", "address", "dob", "source_id"}
+    if current_user.role.value == "sales_rep":
+        blocked = RESTRICTED_FIELDS & set(update_data.keys())
+        if blocked:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Sales reps cannot directly update {', '.join(sorted(blocked))}. "
+                    "Please submit a Lead Update Request for manager approval."
+                ),
+            )
+
     old_status = lead.status
+
 
     # Auto-transition: if a manager/admin assigns an unassigned lead, move to in_progress.
     if (

@@ -48,4 +48,14 @@ export const bulkAssignLeads = (data) =>
 export const bulkDeleteLeads = (data) =>
   api.post('/leads/bulk-delete', data).then((r) => r.data);
 
+// ── Lead Update Requests ──────────────────────────────────────────────
+// Used by sales reps to request contact-field changes (email, phone, etc.)
+// that require manager approval before being applied.
+export const getLeadUpdateRequests = (params = {}) =>
+  api.get('/lead-update-requests/', { params }).then((r) => r.data);
 
+export const createLeadUpdateRequest = (data) =>
+  api.post('/lead-update-requests/', data).then((r) => r.data);
+
+export const resolveLeadUpdateRequest = (id, data) =>
+  api.patch(`/lead-update-requests/${id}`, data).then((r) => r.data);

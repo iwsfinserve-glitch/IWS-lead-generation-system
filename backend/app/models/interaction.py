@@ -363,3 +363,75 @@ class LeadTransferRequest(Base):
 
     def __repr__(self) -> str:
         return f"<LeadTransferRequest id={self.id} lead_id={self.lead_id} status={self.status}>"
+
+
+class LeadUpdateRequest(Base):
+    """A request from a sales rep to update contact-info fields on a lead.
+
+    Sales reps cannot directly edit email, phone, address, DOB or source.
+    Instead they submit a LeadUpdateRequest with the proposed new values.
+    The rep's assigned manager receives a notification and can approve or
+    reject. On approval the Lead columns are updated automatically and a
+    timeline entry is logged. On rejection nothing changes.
+    """
+
+    __tablename__ = "lead_update_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    lead_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    requested_by_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False,
+    )
+    manager_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False,
+    )
+
+    # Proposed new values (None means "not changing this field")
+    proposed_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    proposed_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    proposed_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    proposed_dob: Mapped[date | None] = mapped_column(Date, nullable=True)
+    proposed_source_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("lead_sources.id", ondelete="SET NULL"), nullable=True,
+    )
+
+    # Snapshot of current values at request time — used for the diff display
+    current_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    current_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    current_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_dob: Mapped[date | None] = mapped_column(Date, nullable=True)
+    current_source_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("lead_sources.id", ondelete="SET NULL"), nullable=True,
+    )
+
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+
+    status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="pending",
+        comment="pending | approved | rejected",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
+    # ── Relationships ──────────────────────────────────────────────────
+    lead: Mapped["Lead"] = relationship("Lead", lazy="selectin")                           # noqa: F821
+    requester: Mapped["User"] = relationship(                                               # noqa: F821
+        "User", foreign_keys=[requested_by_id], lazy="selectin",
+    )
+    manager: Mapped["User"] = relationship(                                                 # noqa: F821
+        "User", foreign_keys=[manager_id], lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<LeadUpdateRequest id={self.id} lead_id={self.lead_id} status={self.status}>"
+

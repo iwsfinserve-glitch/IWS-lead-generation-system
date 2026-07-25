@@ -16,6 +16,7 @@ import ReportsPage      from './pages/ReportsPage';
 import UserDetailsPage  from './pages/UserDetailsPage';
 import UsersPage        from './pages/UsersPage';
 import MyTeamPage       from './pages/MyTeamPage';
+import LeadUpdateRequestsPage from './pages/LeadUpdateRequestsPage';
 
 // Layout wrapper for authenticated pages
 function AppLayout() {
@@ -87,6 +88,11 @@ export default function App() {
             <Route path="/my-team"          element={
               <ProtectedRoute roles={['manager']}>
                 <MyTeamPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/lead-update-requests" element={
+              <ProtectedRoute roles={['admin', 'manager']}>
+                <LeadUpdateRequestsPage />
               </ProtectedRoute>
             } />
           </Route>
