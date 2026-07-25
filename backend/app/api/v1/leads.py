@@ -71,7 +71,8 @@ async def list_leads(
     current_user: User = Depends(get_current_user),
 ):
     """List leads with optional filters."""
-    query = select(Lead)
+    from sqlalchemy.orm import outerjoin
+    query = select(Lead).outerjoin(LeadSource, Lead.source_id == LeadSource.id)
 
     if status_filter:
         query = query.where(Lead.status == status_filter)
@@ -85,6 +86,8 @@ async def list_leads(
                 Lead.name.ilike(f"%{search}%"),
                 Lead.email.ilike(f"%{search}%"),
                 Lead.phone_number.ilike(f"%{search}%"),
+                Lead.profession.ilike(f"%{search}%"),
+                LeadSource.name.ilike(f"%{search}%"),
             )
         )
 
@@ -92,6 +95,7 @@ async def list_leads(
     result = await db.execute(query)
     leads = result.scalars().all()
     return [LeadRead.from_orm_lead(l) for l in leads]
+
 
 
 @router.get("/summary")

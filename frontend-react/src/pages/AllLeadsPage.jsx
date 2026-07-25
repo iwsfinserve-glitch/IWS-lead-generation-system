@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Search, Plus, Filter } from 'lucide-react';
+import { Search, Plus, X } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import LeadCard from '../components/cards/LeadCard';
 import Pagination from '../components/common/Pagination';
 import CreateLeadModal from '../components/modals/CreateLeadModal';
 import BulkImportModal from '../components/modals/BulkImportModal';
 import BulkAssignModal from '../components/modals/BulkAssignModal';
-import { getLeads, claimLead, getLeadsSummary, bulkDeleteLeads } from '../api/leadsApi';
+import { getLeads, claimLead, getLeadsSummary, bulkDeleteLeads, getSources } from '../api/leadsApi';
 import { getLeadTransferRequests, updateLeadTransfer } from '../api/usersApi';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -17,6 +17,16 @@ const TABS_MANAGER = ['All Leads', 'My Leads', 'Unassigned', 'Active', 'Converte
 const TABS_REP     = ['All Leads', 'My Leads', 'Unassigned', 'Active', 'Converted', 'Investors'];
 const TABS_ADMIN   = ['All Leads', 'Unassigned', 'Active', 'Converted', 'Investors', 'Transfers'];
 
+const STATUS_OPTIONS = [
+  { value: '', label: 'All Statuses' },
+  { value: 'unassigned',            label: 'Unassigned' },
+  { value: 'in_progress',           label: 'In Progress' },
+  { value: 'potential',             label: 'Potential' },
+  { value: 'non_potential',         label: 'Non-Potential' },
+  { value: 'converted_to_investor', label: 'Converted' },
+  { value: 'existing_investor',     label: 'Existing Investor' },
+];
+
 export default function AllLeadsPage() {
   const { isManagerOrAdmin, isAdmin, isManager, user } = useAuth();
   const TABS = isAdmin ? TABS_ADMIN : isManager ? TABS_MANAGER : TABS_REP;
@@ -25,20 +35,28 @@ export default function AllLeadsPage() {
   const [leads, setLeads]         = useState([]);
   const [summary, setSummary]     = useState({});
   const [transfers, setTransfers] = useState([]);
+  const [sources, setSources]     = useState([]);
   const [loading, setLoading]     = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [showBulkAssign, setShowBulkAssign] = useState(false);
   const [selectedLeadIds, setSelectedLeadIds] = useState(new Set());
   const [search, setSearch]       = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterSource, setFilterSource] = useState('');
   const [page, setPage]           = useState(1);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [l, s] = await Promise.all([getLeads({ limit: 20000 }), getLeadsSummary().catch(() => ({}))]);
+      const [l, s, src] = await Promise.all([
+        getLeads({ limit: 20000 }),
+        getLeadsSummary().catch(() => ({})),
+        getSources().catch(() => []),
+      ]);
       setLeads(l);
       setSummary(s);
+      setSources(src);
       if (isManagerOrAdmin) {
         const t = await getLeadTransferRequests({ status: 'pending' });
         setTransfers(t);
@@ -87,12 +105,36 @@ export default function AllLeadsPage() {
     }
   };
 
-  // Filter leads by tab
+  const resetFilters = () => {
+    setSearch('');
+    setFilterStatus('');
+    setFilterSource('');
+    setPage(1);
+  };
+
+  const hasActiveFilters = search.trim() || filterStatus || filterSource;
+
+  // Filter leads by tab + search + status + source
   const tabLeads = () => {
     let base = leads;
+    // Text search: name, profession, email, phone, source name
     if (search.trim()) {
       const t = search.toLowerCase();
-      base = base.filter((l) => l.name.toLowerCase().includes(t) || (l.profession || '').toLowerCase().includes(t));
+      base = base.filter((l) =>
+        l.name.toLowerCase().includes(t) ||
+        (l.profession || '').toLowerCase().includes(t) ||
+        (l.email || '').toLowerCase().includes(t) ||
+        (l.phone_number || '').toLowerCase().includes(t) ||
+        (l.source_name || '').toLowerCase().includes(t)
+      );
+    }
+    // Status filter
+    if (filterStatus) {
+      base = base.filter((l) => l.status === filterStatus);
+    }
+    // Source filter
+    if (filterSource) {
+      base = base.filter((l) => String(l.source_id) === filterSource);
     }
     switch (tab) {
       case 'My Leads':   return base.filter((l) => l.assigned_rep_id === user?.id);
@@ -143,18 +185,58 @@ export default function AllLeadsPage() {
           </div>
         </div>
 
-        {/* Search */}
-        <div className="filter-toolbar" style={{ marginBottom: 20 }}>
-          <div className="search-wrap" style={{ flex: 1, minWidth: 200 }}>
+        {/* Filter Toolbar */}
+        <div className="filter-toolbar" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
+          {/* Text Search */}
+          <div className="search-wrap" style={{ flex: '1 1 220px', minWidth: 180 }}>
             <Search size={15} className="search-icon" />
             <input
               className="search-input"
-              placeholder="Search by name or profession…"
+              placeholder="Search by name, profession, source…"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               id="all-leads-search"
             />
           </div>
+
+          {/* Status Filter */}
+          <select
+            className="form-input"
+            style={{ minWidth: 150, padding: '8px 12px', fontSize: '0.875rem', cursor: 'pointer' }}
+            value={filterStatus}
+            onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}
+            id="all-leads-filter-status"
+          >
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+
+          {/* Source Filter */}
+          <select
+            className="form-input"
+            style={{ minWidth: 150, padding: '8px 12px', fontSize: '0.875rem', cursor: 'pointer' }}
+            value={filterSource}
+            onChange={(e) => { setFilterSource(e.target.value); setPage(1); }}
+            id="all-leads-filter-source"
+          >
+            <option value="">All Sources</option>
+            {sources.map((s) => (
+              <option key={s.id} value={String(s.id)}>{s.name}</option>
+            ))}
+          </select>
+
+          {/* Clear Filters */}
+          {hasActiveFilters && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={resetFilters}
+              id="all-leads-clear-filters"
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              <X size={14} /> Clear
+            </button>
+          )}
         </div>
 
         {/* Tabs */}
@@ -210,6 +292,7 @@ export default function AllLeadsPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                     Showing {paginated.length} of {filtered.length} leads
+                    {hasActiveFilters && <span style={{ marginLeft: 6, color: 'var(--primary)', fontWeight: 600 }}>· Filtered</span>}
                   </div>
                   {isManagerOrAdmin && (
                     <label style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>

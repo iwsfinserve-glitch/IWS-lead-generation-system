@@ -3,11 +3,11 @@ import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/layout/Navbar';
 import MetricCard from '../components/common/MetricCard';
 import LeadCard from '../components/cards/LeadCard';
-import { getLeads, getLeadsSummary } from '../api/leadsApi';
+import { getLeads, getLeadsSummary, getSources } from '../api/leadsApi';
 import { getAppointments } from '../api/appointmentsApi';
 import { getTasks } from '../api/tasksApi';
 import { getUsers } from '../api/usersApi';
-import { Users, Target, CheckSquare, Calendar, TrendingUp, Plus, ChevronRight } from 'lucide-react';
+import { Users, Target, CheckSquare, TrendingUp, Plus, ChevronRight, Search, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import CreateLeadModal from '../components/modals/CreateLeadModal';
@@ -19,26 +19,59 @@ function SalesRepDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [leads, setLeads]           = useState([]);
+  const [allLeads, setAllLeads]     = useState([]);
   const [summary, setSummary]       = useState({});
+  const [sources, setSources]       = useState([]);
   const [appointments, setAppts]    = useState([]);
   const [tasks, setTasks]           = useState([]);
   const [loading, setLoading]       = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [leadSearch, setLeadSearch] = useState('');
+  const [leadStatus, setLeadStatus] = useState('');
+  const [leadSource, setLeadSource] = useState('');
 
   useEffect(() => {
     Promise.all([
-      getLeads({ assigned_rep_id: user.id, limit: 10 }),
+      getLeads({ assigned_rep_id: user.id, limit: 500 }),
       getLeadsSummary({ assigned_rep_id: user.id }).catch(() => ({})),
       getAppointments(),
       getTasks({ limit: 100 }),
-    ]).then(([l, s, a, t]) => {
-      setLeads(l);
+      getSources().catch(() => []),
+    ]).then(([l, s, a, t, src]) => {
+      setAllLeads(l);
+      setLeads(l.slice(0, 10));
       setSummary(s);
       setAppts(a);
       setTasks(t);
+      setSources(src);
     }).catch(() => toast.error('Failed to load dashboard data'))
       .finally(() => setLoading(false));
   }, [user.id]);
+
+  // Filter my leads based on search/status/source
+  const STATUS_OPTS = [
+    { value: '', label: 'All Statuses' },
+    { value: 'unassigned', label: 'Unassigned' },
+    { value: 'in_progress', label: 'In Progress' },
+    { value: 'potential', label: 'Potential' },
+    { value: 'non_potential', label: 'Non-Potential' },
+    { value: 'converted_to_investor', label: 'Converted' },
+    { value: 'existing_investor', label: 'Existing Investor' },
+  ];
+  const filteredLeads = allLeads.filter((l) => {
+    if (leadSearch.trim()) {
+      const t = leadSearch.toLowerCase();
+      if (!(
+        l.name.toLowerCase().includes(t) ||
+        (l.profession || '').toLowerCase().includes(t) ||
+        (l.source_name || '').toLowerCase().includes(t)
+      )) return false;
+    }
+    if (leadStatus && l.status !== leadStatus) return false;
+    if (leadSource && String(l.source_id) !== leadSource) return false;
+    return true;
+  });
+  const hasLeadFilters = leadSearch.trim() || leadStatus || leadSource;
 
   const now = new Date().toISOString();
   const upcoming = appointments.filter((a) => a.start_time >= now).sort((a, b) => a.start_time.localeCompare(b.start_time)).slice(0, 5);
@@ -110,13 +143,50 @@ function SalesRepDashboard() {
           </button>
         </div>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {leads.slice(0, 10).map((l) => <LeadCard key={l.id} lead={l} />)}
-        {leads.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>No leads assigned to you yet.</p>}
+      {/* Lead Filters */}
+      <div className="filter-toolbar" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <div className="search-wrap" style={{ flex: '1 1 180px', minWidth: 140 }}>
+          <Search size={13} className="search-icon" />
+          <input
+            className="search-input"
+            placeholder="Search leads…"
+            value={leadSearch}
+            onChange={(e) => setLeadSearch(e.target.value)}
+            id="dashboard-lead-search"
+          />
+        </div>
+        <select
+          className="form-input"
+          style={{ minWidth: 130, padding: '7px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
+          value={leadStatus}
+          onChange={(e) => setLeadStatus(e.target.value)}
+          id="dashboard-lead-status"
+        >
+          {STATUS_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <select
+          className="form-input"
+          style={{ minWidth: 130, padding: '7px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
+          value={leadSource}
+          onChange={(e) => setLeadSource(e.target.value)}
+          id="dashboard-lead-source"
+        >
+          <option value="">All Sources</option>
+          {sources.map((s) => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
+        </select>
+        {hasLeadFilters && (
+          <button className="btn btn-ghost btn-sm" onClick={() => { setLeadSearch(''); setLeadStatus(''); setLeadSource(''); }} id="dashboard-lead-clear">
+            <X size={13} /> Clear
+          </button>
+        )}
       </div>
-      {totalLeads > 10 && (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {filteredLeads.slice(0, 10).map((l) => <LeadCard key={l.id} lead={l} />)}
+        {filteredLeads.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>{hasLeadFilters ? 'No leads match your filters.' : 'No leads assigned to you yet.'}</p>}
+      </div>
+      {(hasLeadFilters ? filteredLeads.length : totalLeads) > 10 && (
         <button className="btn btn-ghost btn-full" style={{ marginTop: 12 }} onClick={() => navigate('/leads')} id="dashboard-view-all-leads-btn">
-          View all {totalLeads} leads
+          View all {hasLeadFilters ? filteredLeads.length : totalLeads} leads
         </button>
       )}
 
@@ -130,29 +200,61 @@ function ManagerDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [leads, setLeads]           = useState([]);
+  const [allLeads, setAllLeads]     = useState([]);
   const [summary, setSummary]       = useState({});
+  const [sources, setSources]       = useState([]);
   const [appointments, setAppts]    = useState([]);
   const [tasks, setTasks]           = useState([]);
   const [teamSize, setTeamSize]     = useState(0);
   const [loading, setLoading]       = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [leadSearch, setLeadSearch] = useState('');
+  const [leadStatus, setLeadStatus] = useState('');
+  const [leadSource, setLeadSource] = useState('');
 
   useEffect(() => {
     Promise.all([
-      getLeads({ assigned_rep_id: user.id, limit: 10 }),
+      getLeads({ assigned_rep_id: user.id, limit: 500 }),
       getLeadsSummary({ assigned_rep_id: user.id }).catch(() => ({})),
       getAppointments(),
       getTasks({ limit: 100 }),
       getUsers().then((u) => u.filter((x) => x.manager_id === user.id).length),
-    ]).then(([l, s, a, t, ts]) => {
-      setLeads(l);
+      getSources().catch(() => []),
+    ]).then(([l, s, a, t, ts, src]) => {
+      setAllLeads(l);
+      setLeads(l.slice(0, 10));
       setSummary(s);
       setAppts(a);
       setTasks(t);
       setTeamSize(ts);
+      setSources(src);
     }).catch(() => toast.error('Failed to load dashboard data'))
       .finally(() => setLoading(false));
   }, [user.id]);
+
+  const STATUS_OPTS = [
+    { value: '', label: 'All Statuses' },
+    { value: 'unassigned', label: 'Unassigned' },
+    { value: 'in_progress', label: 'In Progress' },
+    { value: 'potential', label: 'Potential' },
+    { value: 'non_potential', label: 'Non-Potential' },
+    { value: 'converted_to_investor', label: 'Converted' },
+    { value: 'existing_investor', label: 'Existing Investor' },
+  ];
+  const filteredLeads = allLeads.filter((l) => {
+    if (leadSearch.trim()) {
+      const t = leadSearch.toLowerCase();
+      if (!(
+        l.name.toLowerCase().includes(t) ||
+        (l.profession || '').toLowerCase().includes(t) ||
+        (l.source_name || '').toLowerCase().includes(t)
+      )) return false;
+    }
+    if (leadStatus && l.status !== leadStatus) return false;
+    if (leadSource && String(l.source_id) !== leadSource) return false;
+    return true;
+  });
+  const hasLeadFilters = leadSearch.trim() || leadStatus || leadSource;
 
   const now = new Date().toISOString();
   const upcoming  = appointments.filter((a) => a.start_time >= now).sort((a, b) => a.start_time.localeCompare(b.start_time)).slice(0, 5);
@@ -248,13 +350,50 @@ function ManagerDashboard() {
           </button>
         </div>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {leads.slice(0, 10).map((l) => <LeadCard key={l.id} lead={l} />)}
-        {leads.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>No leads assigned to you yet.</p>}
+      {/* Lead Filters */}
+      <div className="filter-toolbar" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <div className="search-wrap" style={{ flex: '1 1 180px', minWidth: 140 }}>
+          <Search size={13} className="search-icon" />
+          <input
+            className="search-input"
+            placeholder="Search leads…"
+            value={leadSearch}
+            onChange={(e) => setLeadSearch(e.target.value)}
+            id="mgr-dashboard-lead-search"
+          />
+        </div>
+        <select
+          className="form-input"
+          style={{ minWidth: 130, padding: '7px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
+          value={leadStatus}
+          onChange={(e) => setLeadStatus(e.target.value)}
+          id="mgr-dashboard-lead-status"
+        >
+          {STATUS_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <select
+          className="form-input"
+          style={{ minWidth: 130, padding: '7px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
+          value={leadSource}
+          onChange={(e) => setLeadSource(e.target.value)}
+          id="mgr-dashboard-lead-source"
+        >
+          <option value="">All Sources</option>
+          {sources.map((s) => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
+        </select>
+        {hasLeadFilters && (
+          <button className="btn btn-ghost btn-sm" onClick={() => { setLeadSearch(''); setLeadStatus(''); setLeadSource(''); }} id="mgr-dashboard-lead-clear">
+            <X size={13} /> Clear
+          </button>
+        )}
       </div>
-      {totalLeads > 10 && (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {filteredLeads.slice(0, 10).map((l) => <LeadCard key={l.id} lead={l} />)}
+        {filteredLeads.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>{hasLeadFilters ? 'No leads match your filters.' : 'No leads assigned to you yet.'}</p>}
+      </div>
+      {(hasLeadFilters ? filteredLeads.length : totalLeads) > 10 && (
         <button className="btn btn-ghost btn-full" style={{ marginTop: 12 }} onClick={() => navigate('/leads')} id="mgr-dashboard-view-all-leads-btn">
-          View all {totalLeads} leads
+          View all {hasLeadFilters ? filteredLeads.length : totalLeads} leads
         </button>
       )}
 
