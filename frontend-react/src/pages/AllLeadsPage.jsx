@@ -42,15 +42,20 @@ export default function AllLeadsPage() {
   const page         = isNaN(pageParam) ? 1 : pageParam;
 
   const updateParams = (newParams) => {
-    const current = Object.fromEntries(searchParams.entries());
-    Object.keys(newParams).forEach(k => {
-      if (newParams[k] === '' || newParams[k] === null || newParams[k] === undefined) {
-        delete current[k];
-      } else {
-        current[k] = newParams[k];
-      }
-    });
-    setSearchParams(current, { replace: true });
+    // Need to use searchParams.entries() but React Router updates are batched/async, 
+    // so consecutive updateParams calls in the same render cycle can overwrite each other.
+    // Instead of using searchParams.entries(), we can pass a function to setSearchParams!
+    setSearchParams(prev => {
+      const current = Object.fromEntries(prev.entries());
+      Object.keys(newParams).forEach(k => {
+        if (newParams[k] === '' || newParams[k] === null || newParams[k] === undefined) {
+          delete current[k];
+        } else {
+          current[k] = newParams[k];
+        }
+      });
+      return current;
+    }, { replace: true });
   };
   const setTab = (val) => updateParams({ tab: val, page: 1 });
   const setSearch = (val) => updateParams({ search: val, page: 1 });
@@ -58,6 +63,7 @@ export default function AllLeadsPage() {
   const setFilterSource = (val) => updateParams({ source: val, page: 1 });
   const setFilterRep = (val) => updateParams({ rep: val, page: 1 });
   const setPage = (val) => updateParams({ page: val });
+
   const [leads, setLeads]         = useState([]);
   const [summary, setSummary]     = useState({});
   const [transfers, setTransfers] = useState([]);
@@ -68,6 +74,18 @@ export default function AllLeadsPage() {
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [showBulkAssign, setShowBulkAssign] = useState(false);
   const [selectedLeadIds, setSelectedLeadIds] = useState(new Set());
+  
+  // Local state for search to avoid lag on every keystroke
+  const [localSearch, setLocalSearch] = useState(search);
+  useEffect(() => { setLocalSearch(search); }, [search]);
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (localSearch !== search) {
+        setSearch(localSearch);
+      }
+    }, 400);
+    return () => clearTimeout(handler);
+  }, [localSearch, search]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -223,8 +241,8 @@ export default function AllLeadsPage() {
             <input
               className="search-input"
               placeholder="Search by name, profession, source…"
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              value={localSearch}
+              onChange={(e) => setLocalSearch(e.target.value)}
               id="all-leads-search"
             />
           </div>
@@ -234,7 +252,7 @@ export default function AllLeadsPage() {
             className="form-select"
             style={{ width: 'auto', minWidth: 150, padding: '8px 12px', fontSize: '0.875rem', cursor: 'pointer' }}
             value={filterStatus}
-            onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}
+            onChange={(e) => setFilterStatus(e.target.value)}
             id="all-leads-filter-status"
           >
             {STATUS_OPTIONS.map((o) => (
@@ -247,7 +265,7 @@ export default function AllLeadsPage() {
             className="form-select"
             style={{ width: 'auto', minWidth: 150, padding: '8px 12px', fontSize: '0.875rem', cursor: 'pointer' }}
             value={filterSource}
-            onChange={(e) => { setFilterSource(e.target.value); setPage(1); }}
+            onChange={(e) => setFilterSource(e.target.value)}
             id="all-leads-filter-source"
           >
             <option value="">All Sources</option>
@@ -262,7 +280,7 @@ export default function AllLeadsPage() {
               className="form-select"
               style={{ width: 'auto', minWidth: 150, padding: '8px 12px', fontSize: '0.875rem', cursor: 'pointer' }}
               value={filterRep}
-              onChange={(e) => { setFilterRep(e.target.value); setPage(1); }}
+              onChange={(e) => setFilterRep(e.target.value)}
               id="all-leads-filter-rep"
             >
               <option value="">All Reps</option>
@@ -292,8 +310,8 @@ export default function AllLeadsPage() {
             <button 
               key={t} 
               className={`tab ${tab === t ? 'active' : ''}`} 
-              onClick={() => { setTab(t); setPage(1); setSelectedLeadIds(new Set()); }} 
-              id={`leads-tab-${t.toLowerCase().replace(/\s+/g,'-')}`}
+              onClick={() => setTab(t)}
+              id={`all-leads-tab-${t.toLowerCase().replace(' ', '-')}`}
             >
               {t} <span style={{ opacity: 0.6, fontSize: '0.75em', marginLeft: 4 }}>({tabCount(t)})</span>
             </button>

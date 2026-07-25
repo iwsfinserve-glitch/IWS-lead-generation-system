@@ -254,17 +254,28 @@ function ManagerDashboard() {
   const leadRep    = searchParams.get('rep') || '';
 
   const updateParams = (newParams) => {
-    const current = Object.fromEntries(searchParams.entries());
-    Object.keys(newParams).forEach(k => {
-      if (!newParams[k]) delete current[k];
-      else current[k] = newParams[k];
-    });
-    setSearchParams(current, { replace: true });
+    setSearchParams(prev => {
+      const current = Object.fromEntries(prev.entries());
+      Object.keys(newParams).forEach(k => {
+        if (!newParams[k]) delete current[k];
+        else current[k] = newParams[k];
+      });
+      return current;
+    }, { replace: true });
   };
   const setLeadSearch = (val) => updateParams({ search: val });
   const setLeadStatus = (val) => updateParams({ status: val });
   const setLeadSource = (val) => updateParams({ source: val });
   const setLeadRep    = (val) => updateParams({ rep: val });
+
+  const [localSearch, setLocalSearch] = useState(leadSearch);
+  useEffect(() => { setLocalSearch(leadSearch); }, [leadSearch]);
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (localSearch !== leadSearch) setLeadSearch(localSearch);
+    }, 400);
+    return () => clearTimeout(handler);
+  }, [localSearch, leadSearch]);
 
   useEffect(() => {
     Promise.all([
@@ -418,8 +429,8 @@ function ManagerDashboard() {
           <input
             className="search-input"
             placeholder="Search leads…"
-            value={leadSearch}
-            onChange={(e) => setLeadSearch(e.target.value)}
+            value={localSearch}
+            onChange={(e) => setLocalSearch(e.target.value)}
             id="mgr-dashboard-lead-search"
           />
         </div>
