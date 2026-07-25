@@ -4,11 +4,6 @@ import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import { Zap, Eye, EyeOff, Loader2 } from 'lucide-react';
 
-const DEMO_CREDS = [
-  { label: 'Admin', email: 'admin@example.com', password: 'admin123', role: 'admin' },
-  { label: 'Manager', email: 'anish@iwsfinserv.com', password: 'manager123', role: 'manager' },
-  { label: 'Sales Rep', email: 'rahul@iwsfinserv.com', password: 'rahul123', role: 'sales_rep' },
-];
 
 export default function LoginPage() {
   const { user, login } = useAuth();
@@ -43,12 +38,6 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const fillDemo = (cred) => {
-    setEmail(cred.email);
-    setPassword(cred.password);
-    setError('');
   };
 
   return (
@@ -150,27 +139,7 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div style={{ marginTop: 28 }}>
-            <hr className="divider" style={{ margin: '0 0 20px' }} />
-            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textAlign: 'center', marginBottom: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
-              Quick Demo Login
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {DEMO_CREDS.map((c) => (
-                <button
-                  key={c.label}
-                  type="button"
-                  className="btn btn-ghost"
-                  id={`demo-login-${c.role}-btn`}
-                  onClick={() => fillDemo(c)}
-                  style={{ justifyContent: 'space-between', fontSize: '0.8rem' }}
-                >
-                  <span style={{ fontWeight: 600 }}>{c.label}</span>
-                  <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace' }}>{c.email}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+
         </div>
 
         <p style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 24 }}>
