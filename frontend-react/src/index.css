@@ -958,6 +958,8 @@ a:hover {
 /* ── Search ── */
 .search-wrap {
   position: relative;
+  flex: 1 1 220px;
+  min-width: 140px;
 }
 
 .search-wrap .search-icon {
@@ -1251,6 +1253,71 @@ a:hover {
   margin-bottom: 20px;
 }
 
+.filter-select {
+  width: auto;
+  min-width: 150px;
+  padding: 8px 12px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.transfer-card {
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.transfer-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.results-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.select-all-label {
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bulk-action-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border);
+  border-radius: 50px;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+  z-index: 100;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100vw - 32px);
+}
+
+.bulk-action-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .page-header {
   display: flex;
   justify-content: space-between;
@@ -1528,6 +1595,71 @@ a:hover {
   .cal-day-num {
     font-size: 0.7rem;
   }
+
+  /* Filter dropdowns full width on mobile */
+  .filter-select {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  /* Filter toolbar — arrange as 2-column grid for selects */
+  .filter-toolbar .search-wrap {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  /* Transfer card stacks vertically */
+  .transfer-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .transfer-actions {
+    width: 100%;
+  }
+
+  .transfer-actions .btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  /* Results bar wraps */
+  .results-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  /* Bulk action bar — bottom fixed full width */
+  .bulk-action-bar {
+    bottom: 0;
+    left: 0;
+    right: 0;
+    transform: none;
+    border-radius: 16px 16px 0 0;
+    max-width: 100%;
+    padding: 14px 16px;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .bulk-action-buttons {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Pagination compact */
+  .pagination {
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 16px 0;
+  }
+
+  .page-btn {
+    width: 30px;
+    height: 30px;
+    font-size: 0.8rem;
+  }
 }
 
 /* ── Small phones (≤ 480px) ── */
@@ -1560,6 +1692,72 @@ a:hover {
   .lead-card {
     padding: 12px 14px;
     grid-template-columns: 1fr;
+  }
+
+  .lead-name {
+    font-size: 0.9rem;
+  }
+
+  .lead-meta {
+    gap: 6px;
+    font-size: 0.72rem;
+  }
+
+  /* Tabs — smaller text on tiny phones */
+  .tab {
+    padding: 8px 10px;
+    font-size: 0.78rem;
+  }
+
+  /* Filter toolbar: two-column grid for selects */
+  .filter-toolbar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .filter-toolbar .search-wrap {
+    grid-column: 1 / -1;
+  }
+
+  .filter-toolbar .filter-select {
+    width: 100% !important;
+    min-width: 0 !important;
+    font-size: 0.8rem;
+    padding: 7px 10px;
+  }
+
+  .filter-toolbar .btn {
+    grid-column: 1 / -1;
+  }
+
+  /* Page header — smaller text */
+  .page-header h1 {
+    font-size: 1.2rem;
+  }
+
+  .page-header p {
+    font-size: 0.8rem;
+  }
+
+  .page-header-actions {
+    flex-wrap: wrap;
+  }
+
+  .page-header-actions .btn {
+    font-size: 0.78rem;
+    padding: 8px 12px;
+  }
+
+  /* Bulk action bar */
+  .bulk-action-bar {
+    padding: 12px;
+    font-size: 0.85rem;
+  }
+
+  .bulk-action-buttons .btn {
+    font-size: 0.75rem;
+    padding: 6px 10px;
   }
 
   h1 {

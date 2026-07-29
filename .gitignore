@@ -110,4 +110,5 @@ desktop.ini
 # ==========================================
 # Ignore local configuration
 # ==========================================
-local_settings.py
+local_settings.pyunassignedLeads.xlsx
+backend/import_unassigned_leads.py

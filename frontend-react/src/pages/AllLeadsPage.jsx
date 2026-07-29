@@ -236,9 +236,9 @@ export default function AllLeadsPage() {
         </div>
 
         {/* Filter Toolbar */}
-        <div className="filter-toolbar" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
+        <div className="filter-toolbar">
           {/* Text Search */}
-          <div className="search-wrap" style={{ flex: '1 1 220px', minWidth: 180 }}>
+          <div className="search-wrap">
             <Search size={15} className="search-icon" />
             <input
               className="search-input"
@@ -251,8 +251,7 @@ export default function AllLeadsPage() {
 
           {/* Status Filter */}
           <select
-            className="form-select"
-            style={{ width: 'auto', minWidth: 150, padding: '8px 12px', fontSize: '0.875rem', cursor: 'pointer' }}
+            className="form-select filter-select"
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
             id="all-leads-filter-status"
@@ -264,8 +263,7 @@ export default function AllLeadsPage() {
 
           {/* Source Filter */}
           <select
-            className="form-select"
-            style={{ width: 'auto', minWidth: 150, padding: '8px 12px', fontSize: '0.875rem', cursor: 'pointer' }}
+            className="form-select filter-select"
             value={filterSource}
             onChange={(e) => setFilterSource(e.target.value)}
             id="all-leads-filter-source"
@@ -279,8 +277,7 @@ export default function AllLeadsPage() {
           {/* Assigned Rep Filter */}
           {isManagerOrAdmin && (
             <select
-              className="form-select"
-              style={{ width: 'auto', minWidth: 150, padding: '8px 12px', fontSize: '0.875rem', cursor: 'pointer' }}
+              className="form-select filter-select"
               value={filterRep}
               onChange={(e) => setFilterRep(e.target.value)}
               id="all-leads-filter-rep"
@@ -329,7 +326,7 @@ export default function AllLeadsPage() {
                 <div className="empty-state-title">No pending transfer requests</div>
               </div>
             ) : transfers.filter((r) => r.status === 'pending').map((r) => (
-              <div key={r.id} className="glass-card" style={{ padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div key={r.id} className="glass-card transfer-card">
                 <div>
                   <div style={{ fontWeight: 700 }}>{r.lead_name}</div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>
@@ -337,7 +334,7 @@ export default function AllLeadsPage() {
                   </div>
                   {r.reason && <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>{r.reason}</div>}
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div className="transfer-actions">
                   <button className="btn btn-primary btn-sm" onClick={() => handleTransfer(r.id, 'approved')} id={`approve-transfer-${r.id}`}>Approve</button>
                   <button className="btn btn-danger btn-sm"  onClick={() => handleTransfer(r.id, 'rejected')} id={`reject-transfer-${r.id}`}>Reject</button>
                 </div>
@@ -356,13 +353,13 @@ export default function AllLeadsPage() {
               </div>
             ) : (
               <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div className="results-bar">
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                     Showing {paginated.length} of {filtered.length} leads
                     {hasActiveFilters && <span style={{ marginLeft: 6, color: 'var(--primary)', fontWeight: 600 }}>· Filtered</span>}
                   </div>
                   {isManagerOrAdmin && (
-                    <label style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                    <label className="select-all-label">
                       <input 
                         type="checkbox" 
                         className="form-input" 
@@ -407,18 +404,9 @@ export default function AllLeadsPage() {
       </div>
 
       {selectedLeadIds.size > 0 && isManagerOrAdmin && (
-        <div style={{
-          position: 'fixed',
-          bottom: 24, left: '50%', transform: 'translateX(-50%)',
-          background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-          borderRadius: 50, padding: '12px 24px',
-          display: 'flex', alignItems: 'center', gap: 12,
-          boxShadow: '0 8px 30px rgba(0,0,0,0.12)', zIndex: 100,
-          flexWrap: 'wrap', justifyContent: 'center',
-          maxWidth: 'calc(100vw - 32px)',
-        }}>
+        <div className="bulk-action-bar">
           <span style={{ fontWeight: 600 }}>{selectedLeadIds.size} leads selected</span>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div className="bulk-action-buttons">
             <button className="btn btn-ghost btn-sm" onClick={() => setSelectedLeadIds(new Set())}>Clear</button>
             {user?.role === 'admin' && (
               <button className="btn btn-danger btn-sm" onClick={handleBulkDelete}>Delete</button>
