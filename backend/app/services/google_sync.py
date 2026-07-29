@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _get_google_credentials(user) -> Credentials | None:
+def get_google_credentials(user) -> Credentials | None:
     """Build Google OAuth credentials from the user's encrypted tokens.
 
     Handles automatic token refresh if the access token has expired.
@@ -68,7 +68,7 @@ def _schedule_token_persist(user_id: int, new_access_token: str) -> None:
     """Fire-and-forget: persist a refreshed access token back to the DB.
 
     We do this inside a synchronous helper that schedules a coroutine via
-    asyncio rather than blocking. Called only from _get_google_credentials.
+    asyncio rather than blocking. Called only from get_google_credentials.
     """
     import asyncio
 
@@ -144,7 +144,7 @@ async def sync_appointment_to_calendar(user, appointment, action: str) -> None:
         appointment: The Appointment ORM object.
         action:      "create" or "update".
     """
-    creds = _get_google_credentials(user)
+    creds = get_google_credentials(user)
     if not creds:
         return
 
@@ -199,7 +199,7 @@ async def sync_appointment_to_calendar(user, appointment, action: str) -> None:
 
 async def delete_calendar_event(user, google_event_id: str) -> None:
     """Delete an event from Google Calendar by its event ID."""
-    creds = _get_google_credentials(user)
+    creds = get_google_credentials(user)
     if not creds:
         return
 
@@ -242,7 +242,7 @@ async def bulk_sync_all_appointments(user_id: int) -> dict:
             logger.warning("bulk_sync: user %s not found or not Google-connected", user_id)
             return {"synced": 0, "failed": 0, "skipped": 0}
 
-        creds = _get_google_credentials(user)
+        creds = get_google_credentials(user)
         if not creds:
             return {"synced": 0, "failed": 0, "skipped": 0}
 
@@ -340,7 +340,7 @@ async def sync_task_to_google(user, task, action: str) -> None:
         task:   The Task ORM object.
         action: "create" or "update".
     """
-    creds = _get_google_credentials(user)
+    creds = get_google_credentials(user)
     if not creds:
         return
 
@@ -394,7 +394,7 @@ async def sync_task_to_google(user, task, action: str) -> None:
 
 async def delete_google_task(user, google_task_id: str) -> None:
     """Delete a task from Google Tasks."""
-    creds = _get_google_credentials(user)
+    creds = get_google_credentials(user)
     if not creds:
         return
 

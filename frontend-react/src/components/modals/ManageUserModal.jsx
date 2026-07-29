@@ -9,6 +9,7 @@ export default function ManageUserModal({ user: existingUser, onClose, onSaved }
   const [managers, setManagers] = useState([]);
   const [form, setForm] = useState({
     name:         existingUser?.name || '',
+    username:     existingUser?.username || '',
     email:        existingUser?.email || '',
     phone_number: existingUser?.phone_number || '',
     password:     '',
@@ -26,7 +27,8 @@ export default function ManageUserModal({ user: existingUser, onClose, onSaved }
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (form.name.trim().length < 2) { toast.error('Name must be at least 2 characters'); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) { toast.error('Please enter a valid email address'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.username.trim())) { toast.error('Please enter a valid username (email format)'); return; }
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) { toast.error('Please enter a valid sending email address'); return; }
     if (!/^\+?[0-9\s\-()]{7,20}$/.test(form.phone_number.trim())) { toast.error('Please enter a valid phone number'); return; }
     if (!isEdit && !form.password) { toast.error('Password is required for new users'); return; }
     if (form.password && form.password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
@@ -35,7 +37,8 @@ export default function ManageUserModal({ user: existingUser, onClose, onSaved }
     try {
       const payload = {
         name: form.name.trim(),
-        email: form.email.trim(),
+        username: form.username.trim(),
+        email: form.email.trim() || null,
         phone_number: form.phone_number.trim(),
         role: form.role,
       };
@@ -66,8 +69,13 @@ export default function ManageUserModal({ user: existingUser, onClose, onSaved }
             onChange={(e) => set('name', e.target.value)} id="user-name" />
         </div>
         <div className="form-group">
-          <label className="form-label">Email *</label>
-          <input className="form-input" type="email" placeholder="jane@iwsfinserv.com" value={form.email}
+          <label className="form-label">Username (Email format) *</label>
+          <input className="form-input" type="email" placeholder="jane@iwsfinserv.com" value={form.username}
+            onChange={(e) => set('username', e.target.value)} id="user-username" />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Sending Email (Optional)</label>
+          <input className="form-input" type="email" placeholder="jane.sales@gmail.com" value={form.email}
             onChange={(e) => set('email', e.target.value)} id="user-email" />
         </div>
         <div className="form-group">

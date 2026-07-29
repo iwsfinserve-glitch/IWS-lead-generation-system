@@ -540,7 +540,7 @@ function AdminDashboard() {
                 <RoleBadge role={u.role} />
               </div>
             </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{u.email}</div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{u.username}</div>
           </div>
         ))}
       </div>

@@ -8,7 +8,7 @@ import { Zap, Eye, EyeOff, Loader2 } from 'lucide-react';
 export default function LoginPage() {
   const { user, login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail]       = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw]     = useState(false);
   const [loading, setLoading]   = useState(false);
@@ -18,18 +18,18 @@ export default function LoginPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!email.trim() || !password) { setError('Email and password are required.'); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setError('Please enter a valid email address.'); return; }
+    if (!username.trim() || !password) { setError('Username and password are required.'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username.trim())) { setError('Please enter a valid email address.'); return; }
     setError('');
     setLoading(true);
     try {
-      await login(email.trim(), password);
+      await login(username.trim(), password);
       toast.success('Welcome back!');
       navigate('/dashboard');
     } catch (err) {
       const status = err.response?.status;
       if (status === 401 || status === 400) {
-        setError('Invalid email or password.');
+        setError('Invalid username or password.');
       } else if (!err.response) {
         setError('Cannot connect to server. Is the backend running?');
       } else {
@@ -82,15 +82,15 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} id="login-form">
             <div className="form-group">
-              <label className="form-label" htmlFor="login-email">Email Address</label>
+              <label className="form-label" htmlFor="login-username">Username (Old Email)</label>
               <input
-                id="login-email"
-                type="email"
+                id="login-username"
+                type="text"
                 className="form-input"
                 placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
                 disabled={loading}
               />
             </div>

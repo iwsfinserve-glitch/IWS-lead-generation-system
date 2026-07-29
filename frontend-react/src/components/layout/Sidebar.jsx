@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import {
   LayoutDashboard, Users, Users2, Target, Calendar, CheckSquare,
-  BarChart3, LogOut, Zap, X, FileEdit,
+  BarChart3, LogOut, Zap, X, FileEdit, Mail
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -13,6 +13,7 @@ const navItems = [
   { to: '/leads',        icon: Target,           label: 'All Leads' },
   { to: '/appointments', icon: Calendar,         label: 'Appointments' },
   { to: '/tasks',        icon: CheckSquare,      label: 'Tasks' },
+  { to: '/emails',       icon: Mail,             label: 'Email Leads' },
   { to: '/reports',      icon: BarChart3,        label: 'Reports' },
 ];
 

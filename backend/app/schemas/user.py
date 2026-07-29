@@ -11,7 +11,8 @@ from app.models.enums import UserRole
 class UserCreate(BaseModel):
     """Schema for creating a new user (admin-only registration)."""
     name: str = Field(..., min_length=1, max_length=255)
-    email: EmailStr
+    username: EmailStr  # We continue validating it as EmailStr to ensure backwards-compat or just a valid email format
+    email: EmailStr | None = None
     phone_number: str = Field(..., min_length=1, max_length=50)
     password: str = Field(..., min_length=6, max_length=128)
     role: UserRole = UserRole.sales_rep
@@ -22,7 +23,8 @@ class UserRead(BaseModel):
     """Schema returned when reading user data — excludes sensitive fields."""
     id: int
     name: str
-    email: str
+    username: str
+    email: str | None = None
     phone_number: str
     role: UserRole
     manager_id: int | None = None
@@ -35,6 +37,7 @@ class UserRead(BaseModel):
         return cls(
             id=user.id,
             name=user.name,
+            username=user.username,
             email=user.email,
             phone_number=user.phone_number,
             role=user.role,
@@ -46,6 +49,7 @@ class UserRead(BaseModel):
 class UserUpdate(BaseModel):
     """Schema for updating an existing user — all fields optional."""
     name: str | None = Field(None, min_length=1, max_length=255)
+    username: EmailStr | None = None
     email: EmailStr | None = None
     phone_number: str | None = Field(None, min_length=1, max_length=50)
     password: str | None = Field(None, min_length=6, max_length=128)

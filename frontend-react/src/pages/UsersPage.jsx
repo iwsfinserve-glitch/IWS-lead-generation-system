@@ -42,7 +42,7 @@ export default function UsersPage() {
 
   const filtered = users.filter((u) => {
     const nameMatch = u.name.toLowerCase().includes(search.toLowerCase()) ||
-                      u.email.toLowerCase().includes(search.toLowerCase());
+                      u.username.toLowerCase().includes(search.toLowerCase());
     const roleMatch = !roleFilter || u.role === roleFilter;
     return nameMatch && roleMatch;
   });
@@ -126,7 +126,7 @@ export default function UsersPage() {
                     </div>
                   </div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {u.email} {u.phone_number ? ` · ${u.phone_number}` : ''}
+                    {u.username} {u.phone_number ? ` · ${u.phone_number}` : ''}
                   </div>
                   {isAdmin && (
                     <div style={{ display: 'flex', gap: 8 }} onClick={(e) => e.stopPropagation()}>

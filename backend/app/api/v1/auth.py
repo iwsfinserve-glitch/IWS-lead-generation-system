@@ -35,6 +35,7 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/tasks",
+    "https://www.googleapis.com/auth/gmail.send",
 ]
 
 
@@ -75,7 +76,7 @@ async def register_user(
     current_user: User = Depends(require_roles("admin")),
 ):
     """Create a new user. Admin only."""
-    existing = await db.execute(select(User).where(User.email == payload.email))
+    existing = await db.execute(select(User).where(User.username == payload.username))
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -84,6 +85,7 @@ async def register_user(
 
     user = User(
         name=payload.name,
+        username=payload.username,
         email=payload.email,
         phone_number=payload.phone_number,
         hashed_password=hash_password(payload.password),
@@ -103,14 +105,14 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
-    """Authenticate with email + password, receive a JWT."""
-    result = await db.execute(select(User).where(User.email == form_data.username))
+    """Authenticate with username + password, receive a JWT."""
+    result = await db.execute(select(User).where(User.username == form_data.username))
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
+            detail="Invalid username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -275,11 +277,7 @@ async def google_connect(
     After granting consent, Google redirects back to /google/callback
     with an auth code. The user's ID is passed in the OAuth `state` param.
     """
-    frontend_base = (
-        settings.GOOGLE_REDIRECT_URI
-        .split("/api/")[0]
-        .replace(":8000", ":5173")
-    )
+    frontend_base = settings.FRONTEND_URL.rstrip("/")
 
     if not token:
         return RedirectResponse(url=f"{frontend_base}/login?google_error=1&error_msg=Missing+authentication+token")
@@ -344,9 +342,7 @@ async def google_callback(
         import urllib.parse
         logging.error(f"Google OAuth token exchange failed: {e}", exc_info=True)
         # Redirect to frontend with an error flag and the error message URL-encoded.
-        frontend_url = settings.GOOGLE_REDIRECT_URI.replace(
-            "/api/v1/auth/google/callback", ""
-        ).replace("8000", "5173")
+        frontend_url = settings.FRONTEND_URL.rstrip("/")
         error_msg = urllib.parse.quote(str(e))
         return RedirectResponse(
             url=f"{frontend_url}/appointments?google_error=1&error_msg={error_msg}"
@@ -356,11 +352,7 @@ async def google_callback(
 
     # Parse user_id out of the opaque state string.
     # The state was set to the plain user ID in /google/connect.
-    frontend_base = (
-        settings.GOOGLE_REDIRECT_URI
-        .split("/api/")[0]
-        .replace(":8000", ":5173")
-    )
+    frontend_base = settings.FRONTEND_URL.rstrip("/")
 
     try:
         user_id = int(state)
@@ -390,14 +382,7 @@ async def google_callback(
     from app.services.google_sync import bulk_sync_all_appointments
     background_tasks.add_task(bulk_sync_all_appointments, user.id)
 
-    # Determine the Streamlit frontend URL from the configured redirect URI
-    # e.g. http://localhost:8000/api/v1/auth/google/callback
-    #   -> http://localhost:8501
-    frontend_base = (
-        settings.GOOGLE_REDIRECT_URI
-        .split("/api/")[0]           # strip the path
-        .replace(":8000", ":5173")  # swap backend port for frontend React port
-    )
+    frontend_base = settings.FRONTEND_URL.rstrip("/")
     redirect_target = f"{frontend_base}/appointments?google_connected=1"
     return RedirectResponse(url=redirect_target, status_code=302)
 

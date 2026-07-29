@@ -12,6 +12,7 @@ import AllLeadsPage     from './pages/AllLeadsPage';
 import LeadDetailsPage  from './pages/LeadDetailsPage';
 import AppointmentsPage from './pages/AppointmentsPage';
 import TasksPage        from './pages/TasksPage';
+import EmailLeadsPage   from './pages/EmailLeadsPage';
 import ReportsPage      from './pages/ReportsPage';
 import UserDetailsPage  from './pages/UserDetailsPage';
 import UsersPage        from './pages/UsersPage';
@@ -78,6 +79,7 @@ export default function App() {
             <Route path="/leads/:id"        element={<LeadDetailsPage />} />
             <Route path="/appointments"     element={<AppointmentsPage />} />
             <Route path="/tasks"            element={<TasksPage />} />
+            <Route path="/emails"           element={<EmailLeadsPage />} />
             <Route path="/reports"          element={<ReportsPage />} />
             <Route path="/users"            element={
               <ProtectedRoute roles={['admin', 'manager']}>
