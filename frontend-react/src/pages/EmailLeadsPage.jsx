@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Mail, Send, Calendar, Clock, X } from 'lucide-react';
+import { Mail, Send, Calendar, Clock, X, ExternalLink } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import { getLeads } from '../api/leadsApi';
 import { sendEmailToLead, getEmailHistory } from '../api/emailsApi';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
+import { getGoogleStatus, getGoogleConnectUrl } from '../api/authApi';
 import Modal from '../components/common/Modal';
 
 export default function EmailLeadsPage() {
@@ -19,11 +20,19 @@ export default function EmailLeadsPage() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [selectedHistoryItem, setSelectedHistoryItem] = useState(null);
 
+  const [googleStatus, setGoogleStatus] = useState({ google_connected: false });
+  const [loadingGoogle, setLoadingGoogle] = useState(true);
+
   useEffect(() => {
     if (user?.id) {
       getLeads({ assigned_rep_id: user.id, limit: 1000 })
         .then(setLeads)
         .catch(() => toast.error('Failed to load leads'));
+        
+      getGoogleStatus()
+        .then(setGoogleStatus)
+        .catch(() => setGoogleStatus({ google_connected: false }))
+        .finally(() => setLoadingGoogle(false));
     }
   }, [user?.id]);
 
@@ -41,7 +50,7 @@ export default function EmailLeadsPage() {
 
   const handleSend = async (e) => {
     e.preventDefault();
-    if (!selectedLeadId || !subject.trim() || !body.trim()) return;
+    if (!selectedLeadId || !subject.trim() || !body.trim() || !googleStatus.google_connected) return;
 
     setSending(true);
     try {
@@ -61,6 +70,13 @@ export default function EmailLeadsPage() {
     } finally {
       setSending(false);
     }
+  };
+
+  const handleGoogleConnect = async () => {
+    try {
+      const url = await getGoogleConnectUrl();
+      window.location.href = url;
+    } catch { toast.error('Failed to start Google auth'); }
   };
 
   const isFormValid = selectedLeadId && subject.trim() && body.trim();
@@ -120,15 +136,30 @@ export default function EmailLeadsPage() {
               />
             </div>
             
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button 
-                type="submit" 
-                className="btn btn-primary" 
-                disabled={!isFormValid || sending}
-              >
-                <Send size={16} />
-                {sending ? 'Sending...' : 'Send Email'}
-              </button>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+              {loadingGoogle ? (
+                <button type="button" className="btn btn-primary" disabled>
+                  Loading...
+                </button>
+              ) : !googleStatus.google_connected ? (
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={handleGoogleConnect}
+                >
+                  <ExternalLink size={16} />
+                  Connect Google Workspace to Send Emails
+                </button>
+              ) : (
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  disabled={!isFormValid || sending}
+                >
+                  <Send size={16} />
+                  {sending ? 'Sending...' : 'Send Email'}
+                </button>
+              )}
             </div>
           </form>
         </div>
