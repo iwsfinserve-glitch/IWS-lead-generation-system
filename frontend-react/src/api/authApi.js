@@ -19,7 +19,7 @@ export const refreshToken = (refresh_token) =>
 export const getGoogleStatus = () =>
   api.get('/auth/google/status').then((r) => r.data);
 
-export const getGoogleConnectUrl = async () => {
+export const getGoogleConnectUrl = async (returnTo = '/appointments') => {
   const token = localStorage.getItem('access_token');
   // Ensure we use the absolute backend URL so the browser navigates directly to the backend
   // instead of the frontend React router catching the route and redirecting to the dashboard.
@@ -29,7 +29,7 @@ export const getGoogleConnectUrl = async () => {
     normalizedBaseUrl = `https://${normalizedBaseUrl}`;
   }
   const prefix = normalizedBaseUrl ? `${normalizedBaseUrl.replace(/\/+$/, '')}/api/v1` : '/api/v1';
-  return `${prefix}/auth/google/connect?token=${token}`;
+  return `${prefix}/auth/google/connect?token=${token}&return_to=${encodeURIComponent(returnTo)}`;
 };
 
 export const googleDisconnect = () =>

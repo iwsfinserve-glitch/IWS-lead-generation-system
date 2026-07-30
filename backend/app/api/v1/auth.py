@@ -267,6 +267,7 @@ async def delete_user(
 @router.get("/google/connect")
 async def google_connect(
     token: str | None = None,
+    return_to: str = "/appointments",
     db: AsyncSession = Depends(get_db),
 ):
     """Redirect the user to Google's OAuth consent screen.
@@ -309,7 +310,7 @@ async def google_connect(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
-        state=str(user.id),
+        state=f"{user.id}:{return_to}",
     )
 
     return RedirectResponse(url=auth_url)
@@ -350,12 +351,19 @@ async def google_callback(
 
     credentials = flow.credentials
 
-    # Parse user_id out of the opaque state string.
-    # The state was set to the plain user ID in /google/connect.
+    # Parse user_id and return_to out of the opaque state string.
+    # The state was set to "user_id:return_to" in /google/connect.
     frontend_base = settings.FRONTEND_URL.rstrip("/")
 
+    parts = state.split(":", 1)
+    if len(parts) == 2:
+        user_id_str, return_to = parts
+    else:
+        user_id_str = state
+        return_to = "/appointments"
+
     try:
-        user_id = int(state)
+        user_id = int(user_id_str)
     except ValueError:
         return RedirectResponse(
             url=f"{frontend_base}/appointments?google_error=1&error_msg=Invalid+state+parameter"
@@ -383,7 +391,11 @@ async def google_callback(
     background_tasks.add_task(bulk_sync_all_appointments, user.id)
 
     frontend_base = settings.FRONTEND_URL.rstrip("/")
-    redirect_target = f"{frontend_base}/appointments?google_connected=1"
+    # Ensure return_to starts with a slash
+    if not return_to.startswith("/"):
+        return_to = f"/{return_to}"
+        
+    redirect_target = f"{frontend_base}{return_to}?google_connected=1"
     return RedirectResponse(url=redirect_target, status_code=302)
 
 

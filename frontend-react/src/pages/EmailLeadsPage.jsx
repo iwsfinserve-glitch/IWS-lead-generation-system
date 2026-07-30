@@ -74,7 +74,7 @@ export default function EmailLeadsPage() {
 
   const handleGoogleConnect = async () => {
     try {
-      const url = await getGoogleConnectUrl();
+      const url = await getGoogleConnectUrl('/emails');
       window.location.href = url;
     } catch { toast.error('Failed to start Google auth'); }
   };
