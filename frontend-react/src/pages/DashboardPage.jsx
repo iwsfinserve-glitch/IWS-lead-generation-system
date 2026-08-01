@@ -103,8 +103,8 @@ function SalesRepDashboard() {
   const upcoming = appointments.filter((a) => a.start_time >= now).sort((a, b) => a.start_time.localeCompare(b.start_time)).slice(0, 5);
   const pending  = tasks.filter((t) => t.status === 'needsAction').slice(0, 5);
   const totalLeads = summary.total || 0;
-  const unassigned = summary.unassigned || 0;
   const potential  = summary.potential || 0;
+  const nonPotential = summary.non_potential || 0;
   const converted  = summary.converted_to_investor || 0;
 
   if (loading) return <div className="loading-center"><div className="spinner" /> Loading...</div>;
@@ -112,9 +112,9 @@ function SalesRepDashboard() {
   return (
     <>
       <div className="metrics-grid">
-        <MetricCard label="My Leads" value={totalLeads} icon={Target} />
-        <MetricCard label="Unassigned" value={unassigned} icon={Users} color="var(--warning)" />
+        <MetricCard label="My Clients" value={totalLeads} icon={Target} />
         <MetricCard label="Potential" value={potential} icon={TrendingUp} color="var(--accent)" />
+        <MetricCard label="Non-potential" value={nonPotential} icon={X} color="var(--warning)" />
         <MetricCard label="Converted" value={converted} icon={CheckSquare} color="var(--success)" />
       </div>
 
@@ -160,9 +160,9 @@ function SalesRepDashboard() {
         </div>
       </div>
 
-      {/* My Leads */}
+      {/* My Clients */}
       <div className="page-header">
-        <h2 style={{ margin: 0 }}>My Leads</h2>
+        <h2 style={{ margin: 0 }}>My Clients</h2>
         <div className="page-header-actions">
           <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)} id="dashboard-create-lead-btn">
             <Plus size={14} /> New Lead
@@ -333,6 +333,7 @@ function ManagerDashboard() {
   const pending   = tasks.filter((t) => t.status === 'needsAction').slice(0, 5);
   const totalLeads = summary.total || 0;
   const potential = summary.potential || 0;
+  const nonPotential = summary.non_potential || 0;
   const converted = summary.converted_to_investor || 0;
 
   if (loading) return <div className="loading-center"><div className="spinner" /> Loading...</div>;
@@ -340,8 +341,9 @@ function ManagerDashboard() {
   return (
     <>
       <div className="metrics-grid">
-        <MetricCard label="My Leads"   value={totalLeads}  icon={Target} />
+        <MetricCard label="My Clients"   value={totalLeads}  icon={Target} />
         <MetricCard label="Potential"  value={potential}     icon={TrendingUp} color="var(--accent)" />
+        <MetricCard label="Non-potential" value={nonPotential} icon={X} color="var(--warning)" />
         <MetricCard label="Converted"  value={converted}     icon={CheckSquare} color="var(--success)" />
         <MetricCard label="My Team"    value={teamSize}      icon={Users} color="var(--primary-light)"
           onClick={() => navigate('/my-team')} style={{ cursor: 'pointer' }} />
@@ -413,9 +415,9 @@ function ManagerDashboard() {
         </div>
       </div>
 
-      {/* My Leads */}
+      {/* My Clients */}
       <div className="page-header">
-        <h2 style={{ margin: 0 }}>My Leads</h2>
+        <h2 style={{ margin: 0 }}>My Clients</h2>
         <div className="page-header-actions">
           <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)} id="mgr-dashboard-create-lead-btn">
             <Plus size={14} /> New Lead
