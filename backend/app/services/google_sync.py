@@ -100,7 +100,7 @@ def _schedule_token_persist(user_id: int, new_access_token: str) -> None:
         pass
 
 
-def _build_calendar_event_body(appointment) -> dict:
+def _build_calendar_event_body(appointment, lead=None) -> dict:
     """Construct the Google Calendar event payload from an Appointment ORM object."""
     body = {
         "summary": appointment.title,
@@ -128,6 +128,9 @@ def _build_calendar_event_body(appointment) -> dict:
     if appointment.location:
         body["location"] = appointment.location
 
+    if lead and getattr(lead, "email", None):
+        body["attendees"] = [{"email": lead.email, "displayName": getattr(lead, "name", lead.email)}]
+
     return body
 
 
@@ -136,13 +139,14 @@ def _build_calendar_event_body(appointment) -> dict:
 # ===========================================================================
 
 
-async def sync_appointment_to_calendar(user, appointment, action: str) -> None:
+async def sync_appointment_to_calendar(user, appointment, action: str, lead=None) -> None:
     """Push a single appointment to Google Calendar (create or update).
 
     Args:
         user:        The User ORM object (with encrypted Google tokens).
         appointment: The Appointment ORM object.
         action:      "create" or "update".
+        lead:        Optional Lead ORM object (for attendee notification).
     """
     creds = get_google_credentials(user)
     if not creds:
@@ -150,12 +154,12 @@ async def sync_appointment_to_calendar(user, appointment, action: str) -> None:
 
     try:
         service = build("calendar", "v3", credentials=creds)
-        event_body = _build_calendar_event_body(appointment)
+        event_body = _build_calendar_event_body(appointment, lead=lead)
 
         if action == "create":
             event = (
                 service.events()
-                .insert(calendarId="primary", body=event_body)
+                .insert(calendarId="primary", body=event_body, sendUpdates="all")
                 .execute()
             )
             google_event_id = event.get("id")
@@ -164,6 +168,7 @@ async def sync_appointment_to_calendar(user, appointment, action: str) -> None:
                 calendarId="primary",
                 eventId=appointment.google_event_id,
                 body=event_body,
+                sendUpdates="all",
             ).execute()
             google_event_id = appointment.google_event_id
         else:
@@ -195,6 +200,95 @@ async def sync_appointment_to_calendar(user, appointment, action: str) -> None:
         )
     except Exception:
         logger.exception("Google Calendar sync failed for appointment %s", appointment.id)
+
+
+async def send_appointment_email_via_gmail(user, lead, appointment, action: str = "created") -> None:
+    """Send a custom HTML confirmation email to the lead via Gmail API from the user's account."""
+    if not lead or not getattr(lead, "email", None):
+        logger.info("No lead email available for appointment %s — skipping Gmail notification", appointment.id)
+        return
+
+    creds = get_google_credentials(user)
+    if not creds:
+        logger.warning("User %s has no Google credentials — skipping Gmail notification", user.id)
+        return
+
+    import base64
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    try:
+        service = build("gmail", "v1", credentials=creds)
+
+        start_str = appointment.start_time.strftime("%B %d, %Y at %I:%M %p UTC")
+        end_str = appointment.end_time.strftime("%I:%M %p UTC")
+        subject_action = "Scheduled" if action == "created" else "Updated"
+        subject = f"Appointment {subject_action}: {appointment.title}"
+
+        location_display = appointment.location or "Online / To be provided"
+        notes_display = appointment.note or "No additional notes."
+
+        html_content = f"""
+        <html>
+          <body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f4f6f8; margin: 0; padding: 20px;">
+            <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.08);">
+              <div style="background: linear-gradient(135deg, #4f46e5, #6366f1); padding: 28px; text-align: center;">
+                <h1 style="color: #ffffff; margin: 0; font-size: 22px;">Appointment {subject_action}</h1>
+              </div>
+              <div style="padding: 32px; color: #334155;">
+                <p style="font-size: 16px; margin-top: 0;">Hi <strong>{lead.name}</strong>,</p>
+                <p style="font-size: 15px; line-height: 1.6; color: #475569;">
+                  Your appointment with <strong>{user.name}</strong> has been {action}. Below are the details of your meeting:
+                </p>
+
+                <div style="background: #f8fafc; border-left: 4px solid #6366f1; padding: 18px; border-radius: 6px; margin: 24px 0;">
+                  <h3 style="margin: 0 0 10px 0; color: #1e293b; font-size: 18px;">{appointment.title}</h3>
+                  <p style="margin: 4px 0; font-size: 14px;"><strong>📅 Date & Time:</strong> {start_str} - {end_str}</p>
+                  <p style="margin: 4px 0; font-size: 14px;"><strong>📍 Location / Link:</strong> {location_display}</p>
+                  <p style="margin: 4px 0; font-size: 14px;"><strong>📝 Notes:</strong> {notes_display}</p>
+                </div>
+
+                <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 14px; color: #64748b;">
+                  <p style="margin: 2px 0;">Best regards,</p>
+                  <p style="margin: 2px 0; font-weight: bold; color: #1e293b;">{user.name}</p>
+                  <p style="margin: 2px 0;">{user.email}</p>
+                </div>
+              </div>
+            </div>
+          </body>
+        </html>
+        """
+
+        message = MIMEMultipart("alternative")
+        message["To"] = lead.email
+        message["From"] = user.email
+        message["Subject"] = subject
+        message.attach(MIMEText(html_content, "html"))
+
+        raw_b64 = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+        service.users().messages().send(userId="me", body={"raw": raw_b64}).execute()
+
+        logger.info("Gmail confirmation sent to %s for appointment %s", lead.email, appointment.id)
+
+        # Log timeline event
+        async with async_session_factory() as session:
+            from app.db.base import LeadTimeline
+            session.add(LeadTimeline(
+                lead_id=lead.id,
+                user_id=user.id,
+                event_type="email_sent",
+                event_metadata={
+                    "appointment_id": appointment.id,
+                    "recipient": lead.email,
+                    "subject": subject,
+                }
+            ))
+            await session.commit()
+
+    except HttpError as e:
+        logger.error("Gmail API error sending to %s for appt %s: %s %s", lead.email, appointment.id, e.status_code, e.reason)
+    except Exception:
+        logger.exception("Failed to send Gmail confirmation for appointment %s", appointment.id)
 
 
 async def delete_calendar_event(user, google_event_id: str) -> None:

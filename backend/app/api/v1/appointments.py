@@ -77,8 +77,9 @@ async def create_appointment(
     await db.refresh(appointment)
 
     if current_user.google_refresh_token:
-        from app.services.google_sync import sync_appointment_to_calendar
-        background_tasks.add_task(sync_appointment_to_calendar, current_user, appointment, "create")
+        from app.services.google_sync import sync_appointment_to_calendar, send_appointment_email_via_gmail
+        background_tasks.add_task(sync_appointment_to_calendar, current_user, appointment, "create", lead)
+        background_tasks.add_task(send_appointment_email_via_gmail, current_user, lead, appointment, "created")
     background_tasks.add_task(trigger_ai_analysis_background, payload.lead_id)
 
     return AppointmentRead.from_orm_appointment(appointment)
@@ -124,9 +125,14 @@ async def update_appointment(
     await db.commit()
     await db.refresh(appointment)
 
-    if current_user.google_refresh_token and appointment.google_event_id:
-        from app.services.google_sync import sync_appointment_to_calendar
-        background_tasks.add_task(sync_appointment_to_calendar, current_user, appointment, "update")
+    if current_user.google_refresh_token:
+        from app.services.google_sync import sync_appointment_to_calendar, send_appointment_email_via_gmail
+        lead_res = await db.execute(select(Lead).where(Lead.id == appointment.lead_id))
+        lead_obj = lead_res.scalar_one_or_none()
+        if appointment.google_event_id:
+            background_tasks.add_task(sync_appointment_to_calendar, current_user, appointment, "update", lead_obj)
+        if changes and lead_obj:
+            background_tasks.add_task(send_appointment_email_via_gmail, current_user, lead_obj, appointment, "updated")
     if changes:
         background_tasks.add_task(trigger_ai_analysis_background, appointment.lead_id)
 
