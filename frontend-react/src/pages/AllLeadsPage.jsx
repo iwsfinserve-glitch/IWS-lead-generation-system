@@ -12,11 +12,9 @@ import { useAuth } from '../context/AuthContext';
 import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
-const PAGE_SIZE = 15;
-
-const TABS_MANAGER = ['All Leads', 'My Leads', 'Unassigned', 'Active', 'Non-Potential', 'Converted', 'Investors', 'Transfers'];
-const TABS_REP     = ['All Leads', 'My Leads', 'Unassigned', 'Active', 'Non-Potential', 'Converted', 'Investors'];
-const TABS_ADMIN   = ['All Leads', 'Unassigned', 'Active', 'Non-Potential', 'Converted', 'Investors', 'Transfers'];
+const TABS_MANAGER = ['All', 'My Clients', 'Unassigned', 'Active', 'Non-Potential', 'Converted', 'Investors', 'Transfers'];
+const TABS_REP     = ['All', 'My Clients', 'Unassigned', 'Active', 'Non-Potential', 'Converted', 'Investors'];
+const TABS_ADMIN   = ['All', 'Unassigned', 'Active', 'Non-Potential', 'Converted', 'Investors', 'Transfers'];
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All Statuses' },
@@ -33,7 +31,7 @@ export default function AllLeadsPage() {
   const TABS = isAdmin ? TABS_ADMIN : isManager ? TABS_MANAGER : TABS_REP;
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab          = searchParams.get('tab') || 'All Leads';
+  const tab          = searchParams.get('tab') || 'All';
   const search       = searchParams.get('search') || '';
   const filterStatus = searchParams.get('status') || '';
   const filterSource = searchParams.get('source') || '';
@@ -64,6 +62,7 @@ export default function AllLeadsPage() {
   const setFilterRep = (val) => updateParams({ rep: val, page: 1 });
   const setPage = (val) => updateParams({ page: val });
 
+  const [pageSize, setPageSize]   = useState(15);
   const [leads, setLeads]         = useState([]);
   const [summary, setSummary]     = useState({});
   const [transfers, setTransfers] = useState([]);
@@ -184,25 +183,27 @@ export default function AllLeadsPage() {
         base = base.filter((l) => String(l.assigned_rep_id) === filterRep);
       }
     }
+    let result = [];
     switch (tab) {
-      case 'My Leads':   return base.filter((l) => l.assigned_rep_id === user?.id);
-      case 'Unassigned': return base.filter((l) => l.status === 'unassigned');
-      case 'Active':     return base.filter((l) => ['in_progress', 'potential'].includes(l.status));
-      case 'Non-Potential': return base.filter((l) => l.status === 'non_potential');
-      case 'Converted':  return base.filter((l) => l.status === 'converted_to_investor');
-      case 'Investors':  return base.filter((l) => l.status === 'existing_investor');
-      case 'Transfers':  return [];
-      default:           return base;
+      case 'My Clients': result = base.filter((l) => l.assigned_rep_id === user?.id); break;
+      case 'Unassigned': result = base.filter((l) => l.status === 'unassigned'); break;
+      case 'Active':     result = base.filter((l) => ['in_progress', 'potential'].includes(l.status)); break;
+      case 'Non-Potential': result = base.filter((l) => l.status === 'non_potential'); break;
+      case 'Converted':  result = base.filter((l) => l.status === 'converted_to_investor'); break;
+      case 'Investors':  result = base.filter((l) => l.status === 'existing_investor'); break;
+      case 'Transfers':  result = []; break;
+      default:           result = base; break;
     }
+    return result.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   };
 
   const filtered = tabLeads();
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const tabCount = (t) => {
     switch (t) {
-      case 'All Leads':  return summary.total || leads.length;
-      case 'My Leads':   return leads.filter((l) => l.assigned_rep_id === user?.id).length;
+      case 'All':  return summary.total || leads.length;
+      case 'My Clients':   return leads.filter((l) => l.assigned_rep_id === user?.id).length;
       case 'Unassigned': return summary.unassigned || leads.filter((l) => l.status === 'unassigned').length;
       case 'Active':     return ((summary.in_progress || 0) + (summary.potential || 0)) || leads.filter((l) => ['in_progress', 'potential'].includes(l.status)).length;
       case 'Non-Potential': return summary.non_potential || leads.filter((l) => l.status === 'non_potential').length;
@@ -354,9 +355,20 @@ export default function AllLeadsPage() {
             ) : (
               <>
                 <div className="results-bar">
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                    Showing {paginated.length} of {filtered.length} leads
-                    {hasActiveFilters && <span style={{ marginLeft: 6, color: 'var(--primary)', fontWeight: 600 }}>· Filtered</span>}
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span>Showing {paginated.length} of {filtered.length} leads
+                    {hasActiveFilters && <span style={{ marginLeft: 6, color: 'var(--primary)', fontWeight: 600 }}>· Filtered</span>}</span>
+                    <select 
+                      className="form-select" 
+                      style={{ padding: '4px 24px 4px 8px', fontSize: '0.75rem', width: 'auto', minHeight: 0 }}
+                      value={pageSize}
+                      onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+                    >
+                      <option value="15">15 per page</option>
+                      <option value="30">30 per page</option>
+                      <option value="50">50 per page</option>
+                      <option value="100">100 per page</option>
+                    </select>
                   </div>
                   {isManagerOrAdmin && (
                     <label className="select-all-label">
@@ -383,7 +395,7 @@ export default function AllLeadsPage() {
                     <LeadCard
                       key={l.id}
                       lead={l}
-                      showClaimBtn={tab === 'Unassigned' || tab === 'All Leads'}
+                      showClaimBtn={tab === 'Unassigned' || tab === 'All'}
                       onClaim={handleClaim}
                       selectable={isManagerOrAdmin}
                       isSelected={selectedLeadIds.has(l.id)}
@@ -396,7 +408,7 @@ export default function AllLeadsPage() {
                     />
                   ))}
                 </div>
-                <Pagination total={filtered.length} page={page} pageSize={PAGE_SIZE} onPage={setPage} />
+                <Pagination total={filtered.length} page={page} pageSize={pageSize} onPage={setPage} />
               </>
             )}
           </>

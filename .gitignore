@@ -16,6 +16,7 @@ clear_db.py
 seed_backup.json
 backend/seed_backup.json
 .env
+cleanup.py
 .pytest_cache/
 /*.md
 /PROJECT_ARCHITECTURE_AND_FEATURES.md
