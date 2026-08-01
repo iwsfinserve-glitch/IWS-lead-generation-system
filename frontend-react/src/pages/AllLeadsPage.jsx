@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { CheckSquare, Plus, Search, Target, X } from 'lucide-react';
+import { CheckSquare, Download, Plus, Search, Target, X } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import LeadCard from '../components/cards/LeadCard';
 import Pagination from '../components/common/Pagination';
@@ -13,7 +13,7 @@ import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
 const TABS_MANAGER = ['All', 'My Clients', 'Unassigned', 'Active', 'Non-Potential', 'Converted', 'Investors', 'Transfers'];
-const TABS_REP     = ['All', 'My Clients', 'Unassigned', 'Active', 'Non-Potential', 'Converted', 'Investors'];
+const TABS_REP     = ['All', 'My Clients', 'Unassigned', 'Active', 'Non-Potential', 'Converted'];
 const TABS_ADMIN   = ['All', 'Unassigned', 'Active', 'Non-Potential', 'Converted', 'Investors', 'Transfers'];
 
 const STATUS_OPTIONS = [
@@ -185,7 +185,14 @@ export default function AllLeadsPage() {
     }
     let result = [];
     switch (tab) {
-      case 'My Clients': result = base.filter((l) => l.assigned_rep_id === user?.id); break;
+      case 'My Clients':
+        // Sales reps see their assigned leads AND existing investors
+        if (!isManagerOrAdmin) {
+          result = base.filter((l) => l.assigned_rep_id === user?.id || l.status === 'existing_investor' && l.assigned_rep_id === user?.id);
+        } else {
+          result = base.filter((l) => l.assigned_rep_id === user?.id);
+        }
+        break;
       case 'Unassigned': result = base.filter((l) => l.status === 'unassigned'); break;
       case 'Active':     result = base.filter((l) => ['in_progress', 'potential'].includes(l.status)); break;
       case 'Non-Potential': result = base.filter((l) => l.status === 'non_potential'); break;
@@ -203,7 +210,9 @@ export default function AllLeadsPage() {
   const tabCount = (t) => {
     switch (t) {
       case 'All':  return summary.total || leads.length;
-      case 'My Clients':   return leads.filter((l) => l.assigned_rep_id === user?.id).length;
+      case 'My Clients':   return !isManagerOrAdmin
+        ? leads.filter((l) => l.assigned_rep_id === user?.id).length
+        : leads.filter((l) => l.assigned_rep_id === user?.id).length;
       case 'Unassigned': return summary.unassigned || leads.filter((l) => l.status === 'unassigned').length;
       case 'Active':     return ((summary.in_progress || 0) + (summary.potential || 0)) || leads.filter((l) => ['in_progress', 'potential'].includes(l.status)).length;
       case 'Non-Potential': return summary.non_potential || leads.filter((l) => l.status === 'non_potential').length;
@@ -212,6 +221,57 @@ export default function AllLeadsPage() {
       case 'Transfers':  return transfers.filter((t) => t.status === 'pending').length;
       default: return 0;
     }
+  };
+
+  const handleExportMyClients = () => {
+    const myClients = leads
+      .filter((l) => l.assigned_rep_id === user?.id)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+    if (myClients.length === 0) {
+      toast.error('No clients to export.');
+      return;
+    }
+
+    const STATUS_LABELS = {
+      unassigned: 'Unassigned',
+      in_progress: 'In Progress',
+      potential: 'Potential',
+      non_potential: 'Non-Potential',
+      converted_to_investor: 'Converted to Investor',
+      existing_investor: 'Existing Investor',
+    };
+
+    const rows = myClients.map((l) => ({
+      'Name':             l.name || '',
+      'Email':            l.email || '',
+      'Phone':            l.phone_number || '',
+      'Profession':       l.profession || '',
+      'Address':          l.address || '',
+      'Date of Birth':    l.date_of_birth || '',
+      'Age':              l.age != null ? l.age : '',
+      'Source':           l.source_name || '',
+      'Status':           STATUS_LABELS[l.status] || l.status || '',
+      'Last Contact Date': l.last_contact_date || '',
+      'Assigned Rep':     l.assigned_rep_name || '',
+    }));
+
+    const headers = Object.keys(rows[0]);
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row =>
+        headers.map(h => `"${String(row[h]).replace(/"/g, '""')}"`).join(',')
+      )
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `my-clients-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${myClients.length} clients to CSV!`);
   };
 
   return (
@@ -225,6 +285,11 @@ export default function AllLeadsPage() {
             <p style={{ color: 'var(--text-muted)' }}>Manage and track all your leads in one place.</p>
           </div>
           <div className="page-header-actions">
+            {tab === 'My Clients' && (
+              <button className="btn btn-ghost" onClick={handleExportMyClients} id="export-my-clients-btn">
+                <Download size={16} /> Export CSV
+              </button>
+            )}
             {isManagerOrAdmin && (
               <button className="btn btn-ghost" onClick={() => setShowBulkImport(true)}>
                 Bulk Import
