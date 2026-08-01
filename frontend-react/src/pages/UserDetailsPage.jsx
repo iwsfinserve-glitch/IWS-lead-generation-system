@@ -121,8 +121,8 @@ export default function UserDetailsPage() {
             <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Username: {user.username}</div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Email: {user.email || 'None'}</div>
-              {user.phone_number && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{user.phone_number}</div>}
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{leads.length} leads · {pendingTasks} pending tasks · {doneTasks} tasks done</div>
+              {user.phone_number && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Phone: {user.phone_number}</div>}
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{leadSummary.total || leads.length} leads · {pendingTasks} pending tasks · {doneTasks} tasks done</div>
             </div>
           </div>
           {isAdmin && (
