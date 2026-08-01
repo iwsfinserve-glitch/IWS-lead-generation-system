@@ -105,7 +105,7 @@ export default function MyTeamPage() {
                   </div>
 
                   <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 14 }}>
-                    {member.username}
+                    {member.email || member.username}
                     {member.phone_number && <span style={{ marginLeft: 8 }}>· {member.phone_number}</span>}
                   </div>
 

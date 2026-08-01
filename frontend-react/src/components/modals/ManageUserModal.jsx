@@ -69,14 +69,9 @@ export default function ManageUserModal({ user: existingUser, onClose, onSaved }
             onChange={(e) => set('name', e.target.value)} id="user-name" />
         </div>
         <div className="form-group">
-          <label className="form-label">Username (Email format) *</label>
+          <label className="form-label">Email Address *</label>
           <input className="form-input" type="email" placeholder="jane@iwsfinserv.com" value={form.username}
             onChange={(e) => set('username', e.target.value)} id="user-username" />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Sending Email (Optional)</label>
-          <input className="form-input" type="email" placeholder="jane.sales@gmail.com" value={form.email}
-            onChange={(e) => set('email', e.target.value)} id="user-email" />
         </div>
         <div className="form-group">
           <label className="form-label">Phone Number *</label>
