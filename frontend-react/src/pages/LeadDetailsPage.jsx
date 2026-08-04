@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Calendar, Edit, Lock, Mail, MapPin, Phone, Trash2, User, Zap } from 'lucide-react';
+import { ArrowLeft, Calendar, Edit, Lock, Mail, MapPin, Phone, Trash2, User } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import { StatusBadge, STATUS_DISPLAY, STATUS_COLOR } from '../components/common/StatusBadge';
 import { getLead, getLeadTimeline, addTimelineNote, updateTimelineNote, updateLead, deleteLead, claimLead, getLeadUpdateRequests } from '../api/leadsApi';

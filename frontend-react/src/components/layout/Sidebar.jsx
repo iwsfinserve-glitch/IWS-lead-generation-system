@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import {
   LayoutDashboard, Users, Users2, Target, Calendar, CheckSquare,
-  BarChart3, LogOut, Zap, X, FileEdit, Mail
+  BarChart3, LogOut, X, FileEdit, Mail
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -61,11 +61,10 @@ export default function Sidebar({ isOpen, onClose }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
           <div style={{
             width: 32, height: 32, borderRadius: 8,
-            background: 'linear-gradient(135deg, var(--primary), var(--accent))',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             flexShrink: 0,
           }}>
-            <Zap size={16} color="#fff" />
+            <img src="/iws_logo_png.png" alt="IWS Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="sidebar-logo-text">IWS Finserv</div>

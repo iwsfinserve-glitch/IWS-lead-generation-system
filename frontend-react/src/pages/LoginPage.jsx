@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
-import { Zap, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 
 
 export default function LoginPage() {
@@ -66,12 +66,10 @@ export default function LoginPage() {
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{
             width: 56, height: 56, borderRadius: 16,
-            background: 'linear-gradient(135deg, var(--primary), var(--accent))',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             margin: '0 auto 16px',
-            boxShadow: '0 8px 24px rgba(99,102,241,0.35)',
           }}>
-            <Zap size={28} color="#fff" />
+            <img src="/iws_logo_png.png" alt="IWS Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           </div>
           <h1 style={{ fontSize: '1.75rem', marginBottom: 6 }}>Lead Management</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>IWS Finserv CRM — Sign in to your account</p>
