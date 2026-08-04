@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import {
   LayoutDashboard, Users, Users2, Target, Calendar, CheckSquare,
-  BarChart3, LogOut, ChevronLeft, ChevronRight, FileEdit, Mail
+  BarChart3, LogOut, X, FileEdit, Mail, ChevronRight
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
@@ -109,46 +109,49 @@ export default function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse
     <>
       <aside className={`sidebar ${isOpen ? 'open' : ''} ${isCollapsed ? 'collapsed' : ''}`}>
 
-        {/* ── Logo + collapse toggle ── */}
+        {/* ── Logo area ── */}
         <div className="sidebar-logo">
-          <div className="sidebar-logo-inner" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {/* Logo icon — always visible */}
-            <div style={{
-              width: 32, height: 32, borderRadius: 8,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flexShrink: 0,
-            }}>
-              <img src="/iws_logo_png.png" alt="IWS Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-            </div>
-
-            {/* Brand text — hidden when collapsed */}
-            {!isCollapsed && (
+          {isCollapsed ? (
+            /* Collapsed: logo acts as the expand button */
+            <button
+              onClick={onToggleCollapse}
+              aria-label="Expand sidebar"
+              title="Expand sidebar"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: '100%', padding: '4px 0',
+              }}
+            >
+              <img src="/iws_logo_png.png" alt="IWS Logo" style={{ width: 32, height: 32, objectFit: 'contain' }} />
+            </button>
+          ) : (
+            /* Expanded: logo + brand text + X to collapse */
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <img src="/iws_logo_png.png" alt="IWS Logo" style={{ width: 32, height: 32, objectFit: 'contain', flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="sidebar-logo-text">IWS Finserv</div>
                 <div className="sidebar-logo-sub">Lead CRM</div>
               </div>
-            )}
-
-            {/* Collapse / expand toggle button */}
-            <button
-              className="sidebar-toggle-btn"
-              onClick={onToggleCollapse}
-              aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              style={{
-                background: 'none', border: 'none',
-                color: 'var(--text-muted)', cursor: 'pointer',
-                padding: 4, borderRadius: 6,
-                display: 'flex', alignItems: 'center',
-                flexShrink: 0, marginLeft: 'auto',
-                transition: 'color 0.15s',
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-primary)'}
-              onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
-            >
-              {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
-            </button>
-          </div>
+              <button
+                onClick={onToggleCollapse}
+                aria-label="Collapse sidebar"
+                title="Collapse sidebar"
+                style={{
+                  background: 'none', border: 'none',
+                  color: 'var(--text-muted)', cursor: 'pointer',
+                  padding: 4, borderRadius: 6,
+                  display: 'flex', alignItems: 'center',
+                  flexShrink: 0,
+                  transition: 'color 0.15s',
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-primary)'}
+                onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+              >
+                <X size={18} />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ── Nav ── */}
