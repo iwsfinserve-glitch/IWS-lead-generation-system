@@ -16,13 +16,13 @@ export default function UserDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user: currentUser, isAdmin } = useAuth();
-  const [user, setUser]         = useState(null);
-  const [leads, setLeads]       = useState([]);
+  const [user, setUser] = useState(null);
+  const [leads, setLeads] = useState([]);
   const [leadSummary, setLeadSummary] = useState({});
-  const [tasks, setTasks]       = useState([]);
-  const [appts, setAppts]       = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [tab, setTab]           = useState('leads');
+  const [tasks, setTasks] = useState([]);
+  const [appts, setAppts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('leads');
   const [showEdit, setShowEdit] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -92,12 +92,12 @@ export default function UserDetailsPage() {
 
   const initials = user.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
   const pendingTasks = tasks.filter((t) => t.status === 'needsAction').length;
-  const doneTasks    = tasks.filter((t) => t.status === 'completed').length;
+  const doneTasks = tasks.filter((t) => t.status === 'completed').length;
 
   const TABS = [
-    { key: 'leads',  label: `Leads (${leadSummary.total || leads.length})` },
-    { key: 'tasks',  label: `Tasks (${tasks.length})` },
-    { key: 'appts',  label: `Appointments (${appts.length})` },
+    { key: 'leads', label: `Leads (${leadSummary.total || leads.length})` },
+    { key: 'tasks', label: `Tasks (${tasks.length})` },
+    { key: 'appts', label: `Appointments (${appts.length})` },
   ];
 
   return (
@@ -121,7 +121,7 @@ export default function UserDetailsPage() {
             <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Email: {user.email || user.username}</div>
               {user.phone_number && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Phone: {user.phone_number}</div>}
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{leadSummary.total || leads.length} leads · {pendingTasks} pending tasks · {doneTasks} tasks done</div>
+              <br /><div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{leadSummary.total || leads.length} leads · {pendingTasks} pending tasks · {doneTasks} tasks done</div>
             </div>
           </div>
           {isAdmin && (
@@ -210,7 +210,7 @@ export default function UserDetailsPage() {
                   <div>
                     <div style={{ fontWeight: 700, marginBottom: 4 }}>{a.title}</div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      {new Date(a.start_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })} · {a.lead_name || `Lead #${a.lead_id}`} · {a.mode?.replace('_',' ')}
+                      {new Date(a.start_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })} · {a.lead_name || `Lead #${a.lead_id}`} · {a.mode?.replace('_', ' ')}
                     </div>
                   </div>
                   {isAdmin && (
