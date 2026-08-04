@@ -21,13 +21,20 @@ import LeadUpdateRequestsPage from './pages/LeadUpdateRequestsPage';
 
 // Layout wrapper for authenticated pages
 function AppLayout() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);  // mobile: is sidebar drawer open
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false); // desktop: icon-only rail
 
   const closeSidebar = () => setSidebarOpen(false);
   const toggleSidebar = () => setSidebarOpen((prev) => !prev);
+  const toggleCollapse = () => setSidebarCollapsed((prev) => !prev);
+
+  // On desktop: sidebar is always present (either full or collapsed rail).
+  // "sidebar-open" class pushes content by full width when not collapsed.
+  // When collapsed, content is pushed by just the rail width (handled by default .main-content margin).
+  const layoutClass = `app-layout ${!sidebarCollapsed ? 'sidebar-open' : ''}`;
 
   return (
-    <div className={`app-layout ${sidebarOpen ? 'sidebar-open' : ''}`}>
+    <div className={layoutClass}>
       {/* Mobile backdrop — only visible on mobile via CSS */}
       <div
         className={`sidebar-backdrop ${sidebarOpen ? 'open' : ''}`}
@@ -35,7 +42,12 @@ function AppLayout() {
         aria-hidden="true"
       />
 
-      <Sidebar isOpen={sidebarOpen} onClose={closeSidebar} />
+      <Sidebar
+        isOpen={sidebarOpen}
+        onClose={closeSidebar}
+        isCollapsed={sidebarCollapsed}
+        onToggleCollapse={toggleCollapse}
+      />
 
       <div className="main-content">
         <Outlet context={{ toggleSidebar }} />

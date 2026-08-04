@@ -128,16 +128,20 @@ body::before {
   min-height: 100vh;
 }
 
+:root {
+  --sidebar-collapsed-width: 64px;
+}
+
 .main-content {
   flex: 1;
-  margin-left: 0;
+  margin-left: var(--sidebar-collapsed-width);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   transition: margin-left var(--transition-base);
 }
 
-/* When sidebar is open on desktop, push content right */
+/* When sidebar is fully expanded, push content further right */
 .sidebar-open .main-content {
   margin-left: var(--sidebar-width);
 }
@@ -602,16 +606,74 @@ a:hover {
   display: flex;
   flex-direction: column;
   z-index: 100;
-  transform: translateX(-100%);
-  transition: transform var(--transition-base);
+  transition: width var(--transition-base);
+  overflow: hidden;
 }
 
-.sidebar.open {
-  transform: translateX(0);
+/* ── Collapsed state: icon-only rail ── */
+.sidebar.collapsed {
+  width: var(--sidebar-collapsed-width);
+}
+
+/* Hide text / labels when collapsed */
+.sidebar.collapsed .sidebar-logo-text,
+.sidebar.collapsed .sidebar-logo-sub,
+.sidebar.collapsed .nav-section-label,
+.sidebar.collapsed .nav-link-label,
+.sidebar.collapsed .sidebar-user-name,
+.sidebar.collapsed .sidebar-user-role,
+.sidebar.collapsed .sidebar-logout-label,
+.sidebar.collapsed .sidebar-badge,
+.sidebar.collapsed .sidebar-chevron {
+  display: none;
+}
+
+/* Center icons when collapsed */
+.sidebar.collapsed .nav-link {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.sidebar.collapsed .sidebar-nav {
+  padding: 16px 8px;
+  align-items: center;
+}
+
+.sidebar.collapsed .sidebar-logo {
+  padding: 18px 0;
+  justify-content: center;
+}
+
+.sidebar.collapsed .sidebar-logo-inner {
+  justify-content: center;
+}
+
+.sidebar.collapsed .sidebar-user-info {
+  justify-content: center;
+  margin-bottom: 8px;
+  padding: 0;
+}
+
+.sidebar.collapsed .sidebar-user {
+  padding: 12px 8px;
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar.collapsed .sidebar-logout-btn {
+  padding: 8px 0;
+  justify-content: center;
+  width: 100%;
+}
+
+.sidebar.collapsed .sidebar-toggle-btn {
+  justify-content: center;
+  width: 100%;
 }
 
 .sidebar-logo {
-  padding: 24px 20px 20px;
+  padding: 20px 16px 16px;
   border-bottom: 1px solid rgba(39, 56, 120, 0.40);
 }
 
@@ -637,6 +699,7 @@ a:hover {
   flex-direction: column;
   gap: 2px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .nav-section-label {
@@ -646,6 +709,7 @@ a:hover {
   letter-spacing: 1.2px;
   color: var(--text-muted);
   padding: 12px 8px 6px;
+  white-space: nowrap;
 }
 
 .nav-link {
@@ -665,6 +729,7 @@ a:hover {
   text-align: left;
   font-family: var(--font-sans);
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .nav-link:hover {
@@ -717,15 +782,17 @@ a:hover {
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--text-primary);
+  white-space: nowrap;
 }
 
 .sidebar-user-role {
   font-size: 0.72rem;
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
-/* Close btn inside sidebar — always visible */
-.sidebar-close-btn {
+/* Toggle expand/collapse button */
+.sidebar-toggle-btn {
   display: flex;
 }
 
@@ -1405,6 +1472,8 @@ a:hover {
   }
 
   .sidebar {
+    /* On mobile: use slide-in/out, ignore width-based collapse */
+    width: var(--sidebar-width) !important;
     transform: translateX(-100%);
     z-index: 200;
     box-shadow: var(--shadow-lg);
@@ -1412,6 +1481,25 @@ a:hover {
 
   .sidebar.open {
     transform: translateX(0);
+  }
+
+  /* On mobile, un-collapse the sidebar when open so all text shows */
+  .sidebar.open.collapsed {
+    width: var(--sidebar-width) !important;
+  }
+  .sidebar.open.collapsed .sidebar-logo-text,
+  .sidebar.open.collapsed .sidebar-logo-sub,
+  .sidebar.open.collapsed .nav-section-label,
+  .sidebar.open.collapsed .nav-link-label,
+  .sidebar.open.collapsed .sidebar-user-name,
+  .sidebar.open.collapsed .sidebar-user-role,
+  .sidebar.open.collapsed .sidebar-logout-label,
+  .sidebar.open.collapsed .sidebar-chevron {
+    display: unset;
+  }
+  .sidebar.open.collapsed .nav-link {
+    justify-content: flex-start;
+    padding: 10px 12px;
   }
 
   .sidebar-backdrop.open {
