@@ -3,10 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Calendar, Edit, Lock, Mail, MapPin, Phone, Trash2, User, Zap } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
 import { StatusBadge, STATUS_DISPLAY, STATUS_COLOR } from '../components/common/StatusBadge';
-import { getLead, getLeadTimeline, addTimelineNote, updateTimelineNote, updateLead, deleteLead, claimLead, getSalesReps, getLeadUpdateRequests } from '../api/leadsApi';
+import { getLead, getLeadTimeline, addTimelineNote, updateTimelineNote, updateLead, deleteLead, claimLead, getLeadUpdateRequests } from '../api/leadsApi';
 import { getLeadAIScore, triggerLeadAIScore, getLeadAIContactTiming, triggerLeadAIContactTiming } from '../api/aiApi';
 
-import { createLeadTransfer } from '../api/usersApi';
+import { createLeadTransfer, createDirectLeadTransfer, getTransferTargets } from '../api/usersApi';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import ScheduleAppointmentModal from '../components/modals/ScheduleAppointmentModal';
@@ -181,7 +181,7 @@ export default function LeadDetailsPage() {
       .catch(() => toast.error('Failed to load lead'))
       .finally(() => setLoading(false));
 
-    getSalesReps().then(setReps).catch(() => {});
+    getTransferTargets().then(setReps).catch(() => {});
 
     // Check for pending update requests on this lead (for the badge)
     getLeadUpdateRequests({ status: 'pending' })
@@ -264,12 +264,24 @@ export default function LeadDetailsPage() {
     if (!transferTo) { toast.error('Select a rep'); return; }
     setTransferring(true);
     try {
-      await createLeadTransfer({ lead_id: parseInt(id), to_user_id: parseInt(transferTo), reason: transferReason || undefined });
-      toast.success('Transfer request submitted!');
+      if (isManagerOrAdmin) {
+        // Direct transfer — no approval needed
+        await createDirectLeadTransfer({ lead_id: parseInt(id), to_user_id: parseInt(transferTo), reason: transferReason || undefined });
+        toast.success('Lead transferred successfully!');
+        // Refresh lead so the assigned rep updates in the UI immediately
+        const updated = await getLead(id);
+        setLead(updated);
+        const t = await getLeadTimeline(id);
+        setTimeline(t);
+      } else {
+        // Sales rep — submit a request for manager approval
+        await createLeadTransfer({ lead_id: parseInt(id), to_user_id: parseInt(transferTo), reason: transferReason || undefined });
+        toast.success('Transfer request submitted!');
+      }
       setTransferTo('');
       setTransferReason('');
-    } catch {
-      toast.error('Transfer request failed');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Transfer failed');
     } finally {
       setTransferring(false);
     }
@@ -299,6 +311,8 @@ export default function LeadDetailsPage() {
   if (!lead) return null;
 
   const statusColor = STATUS_COLOR[lead.status] || '#64748b';
+  // For managers/admins the targets already exclude self (backend handles it);
+  // for sales reps we also filter self out client-side for safety.
   const otherReps = reps.filter((r) => r.id !== user?.id);
 
   const formatTimelineBody = (entry) => {
@@ -458,7 +472,10 @@ export default function LeadDetailsPage() {
                       id="lead-transfer-reason"
                     />
                     <button className="btn btn-secondary btn-sm" onClick={handleTransfer} disabled={transferring} id="lead-transfer-btn">
-                      {transferring ? 'Submitting…' : 'Request Transfer'}
+                      {transferring
+                        ? (isManagerOrAdmin ? 'Transferring…' : 'Submitting…')
+                        : (isManagerOrAdmin ? 'Transfer' : 'Request Transfer')
+                      }
                     </button>
                   </>
                 )}

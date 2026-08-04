@@ -30,3 +30,18 @@ export const createLeadTransfer = (data) =>
 
 export const updateLeadTransfer = (id, data) =>
   api.patch(`/lead-transfer-requests/${id}`, data).then((r) => r.data);
+
+/**
+ * Returns the list of users eligible to receive a lead transfer,
+ * filtered by the current user's role (see backend /auth/transfer-targets).
+ */
+export const getTransferTargets = () =>
+  api.get('/auth/transfer-targets').then((r) => r.data);
+
+/**
+ * Directly transfer a lead to another user (manager/admin only).
+ * No approval required — the reassignment happens immediately.
+ */
+export const createDirectLeadTransfer = (data) =>
+  api.post('/lead-transfer-requests/direct', data).then((r) => r.data);
+

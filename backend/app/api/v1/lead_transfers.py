@@ -1,16 +1,17 @@
 """
-Lead Transfer Request routes — create, list, approve/reject.
+Lead Transfer Request routes — create, list, approve/reject, and direct transfer.
 """
 
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.db.base import User, Lead
-from app.models.interaction import LeadTransferRequest
+from app.models.interaction import LeadTransferRequest, LeadTimeline
 from app.schemas.lead_transfer import (
     LeadTransferRequestCreate,
     LeadTransferRequestRead,
@@ -19,7 +20,109 @@ from app.schemas.lead_transfer import (
 from app.api.dependencies import get_current_user
 from app.services.notification_service import create_notification, notify_managers
 
+
 router = APIRouter(prefix="/lead-transfer-requests", tags=["Lead Transfer Requests"])
+
+
+# ── Inline schema for direct transfer payload ────────────────────────────────
+class DirectLeadTransferPayload(BaseModel):
+    lead_id: int
+    to_user_id: int
+    reason: str | None = None
+
+
+@router.post("/direct", status_code=status.HTTP_200_OK)
+async def direct_lead_transfer(
+    payload: DirectLeadTransferPayload,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Directly transfer a lead without approval. Manager/admin only.
+
+    Immediately reassigns the lead's assigned_rep_id to the target user,
+    logs a timeline entry, and sends notifications to both the previous rep
+    and the new rep.
+    """
+    if not current_user.is_manager_or_above:
+        raise HTTPException(
+            status_code=403,
+            detail="Only managers or admins can directly transfer leads",
+        )
+
+    # Fetch the lead
+    lead_result = await db.execute(select(Lead).where(Lead.id == payload.lead_id))
+    lead = lead_result.scalar_one_or_none()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    # Cannot transfer to the same rep
+    if lead.assigned_rep_id == payload.to_user_id:
+        raise HTTPException(status_code=400, detail="Lead is already assigned to this user")
+
+    # Verify target user exists
+    target_result = await db.execute(select(User).where(User.id == payload.to_user_id))
+    target_user = target_result.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Target user not found")
+
+    old_rep_id = lead.assigned_rep_id
+
+    # Perform the direct transfer
+    lead.assigned_rep_id = payload.to_user_id
+
+    # Log to the lead's timeline
+    db.add(LeadTimeline(
+        lead_id=lead.id,
+        user_id=current_user.id,
+        event_type="lead_transferred",
+        event_metadata={
+            "old_rep_id": old_rep_id,
+            "new_rep_id": target_user.id,
+            "assigned_to": target_user.name,
+            "method": "direct_transfer",
+            "transferred_by": current_user.name,
+            "reason": payload.reason or "",
+        },
+    ))
+
+    # Notify the new rep
+    await create_notification(
+        db,
+        user_id=target_user.id,
+        title="Lead Transferred to You",
+        notification_type="Leads",
+        message=(
+            f'Lead "{lead.name}" has been transferred to you by {current_user.name}.'
+            + (f' Reason: {payload.reason}' if payload.reason else '')
+        ),
+        link_type="lead",
+        link_id=lead.id,
+    )
+
+    # Notify the previous rep (if there was one)
+    if old_rep_id and old_rep_id != current_user.id:
+        await create_notification(
+            db,
+            user_id=old_rep_id,
+            title="Lead Transferred Away",
+            notification_type="Leads",
+            message=(
+                f'Lead "{lead.name}" has been transferred from you to '
+                f'{target_user.name} by {current_user.name}.'
+            ),
+            link_type="lead",
+            link_id=lead.id,
+        )
+
+    await db.commit()
+    await db.refresh(lead)
+
+    return {
+        "message": f'Lead "{lead.name}" successfully transferred to {target_user.name}.',
+        "lead_id": lead.id,
+        "new_assigned_rep_id": target_user.id,
+        "new_assigned_rep_name": target_user.name,
+    }
 
 
 @router.post("/", response_model=LeadTransferRequestRead, status_code=status.HTTP_201_CREATED)

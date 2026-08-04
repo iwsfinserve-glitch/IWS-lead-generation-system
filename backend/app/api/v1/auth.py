@@ -195,6 +195,56 @@ async def list_sales_reps(
     return [UserRead.from_orm_user(u) for u in users]
 
 
+@router.get("/transfer-targets", response_model=list[UserRead])
+async def list_transfer_targets(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the list of users eligible to receive a lead transfer, based on role.
+
+    - **Admin**: All sales reps and managers (everyone except other admins).
+    - **Manager**: Only sales reps they directly manage (manager_id == current_user.id).
+    - **Sales Rep**: Their teammates — sales reps sharing the same manager
+      (manager_id == current_user.manager_id), excluding themselves.
+    """
+    if current_user.is_admin:
+        result = await db.execute(
+            select(User)
+            .where(User.role.in_([UserRole.sales_rep, UserRole.manager]))
+            .where(User.id != current_user.id)
+            .order_by(User.name)
+        )
+    elif current_user.is_manager_or_above:
+        # Manager — show only their direct reports
+        result = await db.execute(
+            select(User)
+            .where(User.role == UserRole.sales_rep)
+            .where(User.manager_id == current_user.id)
+            .order_by(User.name)
+        )
+    else:
+        # Sales rep — show teammates (same manager, excluding themselves)
+        if current_user.manager_id:
+            result = await db.execute(
+                select(User)
+                .where(User.role == UserRole.sales_rep)
+                .where(User.manager_id == current_user.manager_id)
+                .where(User.id != current_user.id)
+                .order_by(User.name)
+            )
+        else:
+            # No manager assigned — show all sales reps except self
+            result = await db.execute(
+                select(User)
+                .where(User.role == UserRole.sales_rep)
+                .where(User.id != current_user.id)
+                .order_by(User.name)
+            )
+
+    users = result.scalars().all()
+    return [UserRead.from_orm_user(u) for u in users]
+
+
 @router.patch("/users/{user_id}", response_model=UserRead)
 async def update_user(
     user_id: int,
