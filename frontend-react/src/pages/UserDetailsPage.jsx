@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Calendar, CheckSquare, Edit, Target, Trash2 } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
-import { getUser, deleteUser } from '../api/usersApi';
+import { getUser, deleteUser, getMe } from '../api/usersApi';
 import { getLeads, getLeadsSummary } from '../api/leadsApi';
 import { getTasks, deleteTask } from '../api/tasksApi';
 import { getAppointments, deleteAppointment } from '../api/appointmentsApi';
@@ -26,11 +26,16 @@ export default function UserDetailsPage() {
   const [showEdit, setShowEdit] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  const isOwnProfile = currentUser && String(currentUser.id) === String(id);
+
   const fetchAll = async () => {
     setLoading(true);
     try {
+      // For own profile, use /auth/me — no admin privilege needed.
+      // For other users, use /auth/users (admin-only).
+      const userPromise = isOwnProfile ? getMe() : getUser(id);
       const [u, l, ls, t, a] = await Promise.all([
-        getUser(id),
+        userPromise,
         getLeads({ assigned_rep_id: id, limit: 200 }),
         getLeadsSummary({ assigned_rep_id: id }).catch(() => ({})),
         getTasks({ assigned_to_id: id, limit: 200 }),

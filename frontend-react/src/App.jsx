@@ -21,14 +21,14 @@ import LeadUpdateRequestsPage from './pages/LeadUpdateRequestsPage';
 
 // Layout wrapper for authenticated pages
 function AppLayout() {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const closeSidebar = () => setSidebarOpen(false);
   const toggleSidebar = () => setSidebarOpen((prev) => !prev);
 
   return (
-    <div className="app-layout">
-      {/* Mobile backdrop */}
+    <div className={`app-layout ${sidebarOpen ? 'sidebar-open' : ''}`}>
+      {/* Mobile backdrop — only visible on mobile via CSS */}
       <div
         className={`sidebar-backdrop ${sidebarOpen ? 'open' : ''}`}
         onClick={closeSidebar}

@@ -4,6 +4,10 @@ import api from './axiosInstance';
 export const getUsers = () =>
   api.get('/auth/users').then((r) => r.data);
 
+/** Get the current logged-in user's own profile — no admin required */
+export const getMe = () =>
+  api.get('/auth/me').then((r) => r.data);
+
 // No single-user GET endpoint exists — fetch all and find by ID
 export const getUser = async (id) => {
   const users = await api.get('/auth/users').then((r) => r.data);
