@@ -714,16 +714,11 @@ a:hover {
   color: var(--text-muted);
 }
 
-/* Close btn inside sidebar — hidden on desktop, shown on mobile */
+/* Close btn inside sidebar — always visible */
 .sidebar-close-btn {
-  display: none;
+  display: flex;
 }
 
-@media (max-width: 768px) {
-  .sidebar-close-btn {
-    display: flex !important;
-  }
-}
 
 
 /* ── Navbar ── */
