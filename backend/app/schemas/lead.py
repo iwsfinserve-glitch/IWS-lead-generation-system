@@ -165,3 +165,27 @@ class LeadTimelineRead(BaseModel):
             created_at=entry.created_at,
             user_name=entry.user.name if entry.user else None,
         )
+
+
+# ── RERA Scraper Ingest Schemas ────────────────────────────────────────
+
+class ReraLeadIngest(BaseModel):
+    """Schema for individual scraped lead record."""
+    name: str = Field(..., min_length=1, max_length=255)
+    dob: date | None = None
+    phone_number: str | None = Field(None, alias="phone")
+    email: str | None = None
+    address: str | None = None
+    profession: str | None = None
+    source: str | None = Field("RERA Scraper", max_length=255)
+    note: str | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+class ReraIngestResponse(BaseModel):
+    """Response schema summarizing the ingestion result."""
+    inserted_count: int
+    skipped_count: int
+    inserted_leads: list[int]
+    skipped_details: list[dict]

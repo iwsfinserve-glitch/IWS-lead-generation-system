@@ -18,6 +18,7 @@ RBAC:
 """
 
 from datetime import date, datetime, timezone
+from collections import defaultdict
 from typing import Optional
 import base64
 
@@ -102,6 +103,35 @@ def _build_lead_date_filter(start_date, end_date):
     return filters
 
 
+def _build_events_over_time(timeline_data: list[dict]) -> list[dict]:
+    """Aggregate timeline events by date for a line chart."""
+    daily: dict = defaultdict(int)
+    for entry in timeline_data:
+        try:
+            day = entry["created_at"][:10]  # ISO date prefix
+            daily[day] += 1
+        except (KeyError, TypeError):
+            continue
+    return [{"date": d, "events": v} for d, v in sorted(daily.items())]
+
+
+def _build_leads_over_time(leads: list) -> list[dict]:
+    """Aggregate lead creation counts by week for a trend line chart."""
+    from datetime import timedelta
+    daily_created: dict = defaultdict(int)
+    daily_converted: dict = defaultdict(int)
+    for lead in leads:
+        if not lead.created_at:
+            continue
+        day = lead.created_at.date().isoformat()
+        daily_created[day] += 1
+        status = lead.status.value if hasattr(lead.status, "value") else str(lead.status)
+        if status in ("converted_to_investor", "existing_investor"):
+            daily_converted[day] += 1
+    all_days = sorted(set(list(daily_created.keys()) + list(daily_converted.keys())))
+    return [{"date": d, "created": daily_created.get(d, 0), "converted": daily_converted.get(d, 0)} for d in all_days]
+
+
 async def _build_periodic_leads_summary(leads: list) -> dict:
     """Build metrics dict from a list of Lead ORM objects."""
     by_status: dict = {}
@@ -140,6 +170,7 @@ async def _build_periodic_leads_summary(leads: list) -> dict:
         "by_status": by_status,
         "by_source": by_source,
         "leads": leads_list,
+        "leads_over_time": _build_leads_over_time(leads),
     }
 
 
@@ -173,7 +204,7 @@ async def _build_user_performance_metrics(
         appt_q = appt_q.where(Appointment.start_time <= datetime(end_date.year, end_date.month, end_date.day, 23, 59, 59, tzinfo=timezone.utc))
     appt_count = (await db.execute(appt_q)).scalar() or 0
 
-    # Tasks
+    # Tasks (with time-series for trend chart)
     task_q = select(TaskModel).where(TaskModel.user_id == target_user.id)
     if start_date:
         task_q = task_q.where(TaskModel.assigned_on >= datetime(start_date.year, start_date.month, start_date.day, tzinfo=timezone.utc))
@@ -183,6 +214,18 @@ async def _build_user_performance_metrics(
     tasks = task_result.scalars().all()
     total_tasks = len(tasks)
     tasks_completed = sum(1 for t in tasks if t.status == "completed")
+
+    # Build tasks-over-time trend (daily assigned vs completed)
+    daily_assigned: dict = defaultdict(int)
+    daily_completed: dict = defaultdict(int)
+    for t in tasks:
+        if t.assigned_on:
+            day = t.assigned_on.date().isoformat() if hasattr(t.assigned_on, 'date') else str(t.assigned_on)[:10]
+            daily_assigned[day] += 1
+            if t.status == "completed":
+                daily_completed[day] += 1
+    all_task_days = sorted(set(list(daily_assigned.keys()) + list(daily_completed.keys())))
+    tasks_over_time = [{"date": d, "assigned": daily_assigned.get(d, 0), "completed": daily_completed.get(d, 0)} for d in all_task_days]
 
     # Timeline interactions
     tl_q = select(func.count()).select_from(LeadTimeline).where(LeadTimeline.user_id == target_user.id)
@@ -205,6 +248,7 @@ async def _build_user_performance_metrics(
         "tasks_completed": tasks_completed,
         "task_completion_rate": round(tasks_completed / total_tasks * 100, 1) if total_tasks else 0,
         "total_interactions": interaction_count,
+        "tasks_over_time": tasks_over_time,
     }
 
 
@@ -212,8 +256,15 @@ async def _build_user_performance_metrics(
 
 async def _lead_journey_data(lead_id: int, current_user: User, db: AsyncSession) -> dict:
     lead = await _get_lead_or_404(lead_id, db)
-    if current_user.role == UserRole.sales_rep and lead.assigned_rep_id != current_user.id:
+    role = current_user.role
+    if role == UserRole.sales_rep and lead.assigned_rep_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can only access reports for your assigned leads")
+    if role == UserRole.manager:
+        # Manager can only view reports for their team's leads
+        sub_ids_r = await db.execute(select(User.id).where(User.manager_id == current_user.id))
+        allowed_ids = {r[0] for r in sub_ids_r.all()} | {current_user.id}
+        if lead.assigned_rep_id not in allowed_ids:
+            raise HTTPException(status_code=403, detail="You can only access reports for your team's leads")
 
     timeline_result = await db.execute(
         select(LeadTimeline).where(LeadTimeline.lead_id == lead_id).order_by(LeadTimeline.created_at.asc())
@@ -224,6 +275,44 @@ async def _lead_journey_data(lead_id: int, current_user: User, db: AsyncSession)
         for e in entries
     ]
     return {"lead": lead, "timeline_data": timeline_data}
+
+
+# ── Lead Journey Dropdown Leads ──────────────────────────────────────────────
+
+@router.get("/journey-leads")
+async def get_journey_leads(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the list of leads eligible for lead journey reports based on RBAC.
+
+    - sales_rep: only their assigned leads
+    - manager: leads assigned to themselves or their direct reports
+    - admin: all leads where status != unassigned
+    """
+    q = select(Lead).options(selectinload(Lead.source))
+    if current_user.role == UserRole.sales_rep:
+        q = q.where(Lead.assigned_rep_id == current_user.id)
+    elif current_user.role == UserRole.manager:
+        sub_ids_r = await db.execute(select(User.id).where(User.manager_id == current_user.id))
+        allowed_ids = [r[0] for r in sub_ids_r.all()] + [current_user.id]
+        q = q.where(Lead.assigned_rep_id.in_(allowed_ids))
+    else:  # admin
+        from app.models.enums import LeadStatus
+        q = q.where(Lead.status != LeadStatus.unassigned)
+    result = await db.execute(q.order_by(Lead.name))
+    leads = result.scalars().all()
+    return [
+        {
+            "id": l.id,
+            "name": l.name,
+            "profession": l.profession,
+            "status": l.status.value if hasattr(l.status, "value") else str(l.status),
+            "source": l.source.name if l.source else None,
+            "assigned_rep_id": l.assigned_rep_id,
+        }
+        for l in leads
+    ]
 
 
 @router.get("/lead-journey/{lead_id}")
@@ -243,6 +332,10 @@ async def lead_journey_report(
         "total_events": len(timeline_data),
         "by_event_type": {et: sum(1 for t in timeline_data if t["event_type"] == et)
                           for et in set(t["event_type"] for t in timeline_data)},
+        "events_over_time": _build_events_over_time(timeline_data),
+        "lead_status": lead.status.value if hasattr(lead.status, "value") else str(lead.status),
+        "lead_profession": lead.profession,
+        "lead_source": lead.source.name if lead.source else None,
     }
     buf = build_docx_report(f"Lead Journey Report — {lead.name}", narrative, metrics, "lead_journey")
     docx_b64 = base64.b64encode(buf.read()).decode()
@@ -510,10 +603,18 @@ async def _team_performance_data(
         if totals["total_leads"] else 0
     )
 
+    # Build per-member status breakdown for stacked bar chart
+    member_status_chart = []
+    for m in member_metrics:
+        row = {"name": m["user_name"][:14]}
+        row.update(m.get("by_status", {}))
+        member_status_chart.append(row)
+
     return {
         "team_label": team_label,
         "member_count": len(users),
         "members": member_metrics,
+        "member_status_chart": member_status_chart,
         "totals": totals,
     }
 

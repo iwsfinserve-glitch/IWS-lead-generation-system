@@ -17,3 +17,10 @@ export const getUserPerformanceReport = (userId, params = {}) =>
 
 export const getTeamPerformanceReport = (params = {}) =>
   api.get('/reports/team-performance', { params }).then((r) => r.data);
+
+// Returns RBAC-filtered leads for the Lead Journey dropdown
+// - sales_rep: their assigned leads only
+// - manager: their team's leads
+// - admin: all leads with status != unassigned
+export const getJourneyLeads = () =>
+  api.get('/reports/journey-leads').then((r) => r.data);

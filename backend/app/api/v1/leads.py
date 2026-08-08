@@ -10,6 +10,8 @@ import csv
 import io
 import openpyxl
 from datetime import datetime
+import difflib
+from typing import Union
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, status, BackgroundTasks, UploadFile, File
 from sqlalchemy import select, or_, and_, update, func
@@ -21,7 +23,7 @@ from app.models.enums import LeadStatus
 from app.schemas.lead import (
     LeadCreate, LeadRead, LeadUpdate,
     LeadTimelineCreate, LeadTimelineRead, LeadTimelineUpdate,
-    WebLeadCreate,
+    WebLeadCreate, ReraLeadIngest, ReraIngestResponse
 )
 from app.schemas.bulk_lead import (
     BulkAssignPayload, BulkAssignResponse,
@@ -778,5 +780,196 @@ async def bulk_delete_leads(
     
     await db.commit()
     return BulkDeleteResponse(deleted_count=deleted_count)
+
+
+# ── RERA Scraper Ingest Workflow ───────────────────────────────────────
+
+def normalize_phone(phone: str | None) -> str | None:
+    """Strip spaces, non-digits, and country codes for comparison."""
+    if not phone:
+        return None
+    digits = ''.join(filter(str.isdigit, phone))
+    # Keep last 10 digits assuming standard Indian/US numbers
+    if len(digits) >= 10:
+        return digits[-10:]
+    return digits if digits else None
+
+def match_name_patterns(name1: str, name2: str) -> bool:
+    """Match exact, initial expansions, or fuzzy string similarity."""
+    if not name1 or not name2:
+        return False
+    n1 = name1.strip().lower()
+    n2 = name2.strip().lower()
+    if n1 == n2:
+        return True
+    
+    # Check for initial matching e.g. "raju n." vs "raju naik"
+    parts1 = n1.replace('.', ' ').split()
+    parts2 = n2.replace('.', ' ').split()
+    
+    if len(parts1) == 2 and len(parts2) == 2:
+        # If first names match exactly
+        if parts1[0] == parts2[0]:
+            # If one is an initial of the other
+            if (len(parts1[1]) == 1 and parts2[1].startswith(parts1[1])) or \
+               (len(parts2[1]) == 1 and parts1[1].startswith(parts2[1])):
+                return True
+
+    # Check fuzzy similarity
+    ratio = difflib.SequenceMatcher(None, n1, n2).ratio()
+    if ratio >= 0.85:
+        return True
+        
+    return False
+
+async def find_duplicate_lead(db: AsyncSession, incoming_lead: ReraLeadIngest) -> Lead | None:
+    """Returns the duplicate Lead object if one exists based on pattern matching rules."""
+    inc_phone = normalize_phone(incoming_lead.phone_number)
+    inc_email = (incoming_lead.email or "").strip().lower()
+    
+    # Query all potential leads that might match (broad net)
+    # We'll pull recent leads or try to match exactly on email or phone first
+    conditions = []
+    if inc_email:
+        conditions.append(func.lower(Lead.email) == inc_email)
+    if inc_phone:
+        # Using like to match phone suffixes in db
+        conditions.append(Lead.phone_number.like(f"%{inc_phone}"))
+    if incoming_lead.name:
+        conditions.append(func.lower(Lead.name) == incoming_lead.name.strip().lower())
+        # Also grab leads with the same first word of name
+        first_name = incoming_lead.name.strip().lower().split()[0] if incoming_lead.name else ""
+        if first_name:
+            conditions.append(func.lower(Lead.name).like(f"{first_name}%"))
+            
+    if not conditions:
+        return None
+        
+    # Get potential matches
+    query = select(Lead).where(or_(*conditions)).limit(20)
+    result = await db.execute(query)
+    potential_leads = result.scalars().all()
+    
+    for db_lead in potential_leads:
+        db_phone = normalize_phone(db_lead.phone_number)
+        db_email = (db_lead.email or "").strip().lower()
+        
+        # Exact Email Match
+        if inc_email and db_email and inc_email == db_email:
+            return db_lead
+            
+        # Exact Phone Match
+        if inc_phone and db_phone and inc_phone == db_phone:
+            return db_lead
+            
+        # Name Pattern Match cross-verified
+        name_match = match_name_patterns(incoming_lead.name, db_lead.name)
+        if name_match:
+            # If name matches and they have same phone/email/dob
+            if (inc_phone and db_phone and inc_phone == db_phone) or \
+               (inc_email and db_email and inc_email == db_email):
+                return db_lead
+            
+            # If name strongly matches and both are missing contact info but DOB/address match
+            if incoming_lead.dob and db_lead.dob and incoming_lead.dob == db_lead.dob:
+                return db_lead
+                
+    return None
+
+@router.post("/public/rera-ingest", response_model=ReraIngestResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/rera-ingest", response_model=ReraIngestResponse, status_code=status.HTTP_201_CREATED)
+async def rera_scraper_ingest(
+    payload: Union[ReraLeadIngest, list[ReraLeadIngest]],
+    background_tasks: BackgroundTasks,
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+    api_key: str | None = Query(None, alias="api_key"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Secure endpoint for ingesting leads from external scrapers (e.g., RERA).
+    
+    Supports single payload or array of leads. Performs advanced deduplication
+    using name pattern matching and contact cross-verification.
+    """
+    provided_key = x_api_key or api_key
+    
+    if not provided_key or provided_key not in [settings.RERA_SCRAPER_API_KEY, settings.SEO_WEB_API_KEY]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid or missing API key."
+        )
+        
+    leads_to_process = payload if isinstance(payload, list) else [payload]
+    
+    inserted_count = 0
+    skipped_count = 0
+    inserted_leads = []
+    skipped_details = []
+    
+    # ── Resolve or create the sources dynamically ────────────────────────────
+    # Cache sources to avoid hitting db in loop
+    sources_cache = {}
+    
+    for incoming_lead in leads_to_process:
+        # Check duplicate
+        duplicate_lead = await find_duplicate_lead(db, incoming_lead)
+        if duplicate_lead:
+            skipped_count += 1
+            skipped_details.append({
+                "name": incoming_lead.name,
+                "reason": f"Matched existing lead ID {duplicate_lead.id} ({duplicate_lead.name})"
+            })
+            continue
+            
+        # Get source ID
+        source_name = (incoming_lead.source or "RERA Scraper").strip()
+        if source_name not in sources_cache:
+            src_result = await db.execute(select(LeadSource).where(LeadSource.name == source_name))
+            src_obj = src_result.scalar_one_or_none()
+            if not src_obj:
+                src_obj = LeadSource(name=source_name, priority="low")
+                db.add(src_obj)
+                await db.flush()
+            sources_cache[source_name] = src_obj.id
+            
+        # Create Lead
+        new_lead = Lead(
+            name=incoming_lead.name,
+            email=incoming_lead.email,
+            phone_number=incoming_lead.phone_number,
+            profession=incoming_lead.profession,
+            address=incoming_lead.address,
+            dob=incoming_lead.dob,
+            source_id=sources_cache[source_name],
+            status=LeadStatus.unassigned,
+            assigned_rep_id=None,
+        )
+        db.add(new_lead)
+        await db.flush()
+        
+        # Timeline Note
+        created_meta = {"created_by": "External Scraper", "lead_name": new_lead.name}
+        if incoming_lead.note:
+            created_meta["note"] = incoming_lead.note.strip()
+            
+        db.add(LeadTimeline(
+            lead_id=new_lead.id,
+            user_id=None,
+            event_type="lead_created",
+            event_metadata=created_meta,
+        ))
+        
+        background_tasks.add_task(trigger_ai_analysis_background, new_lead.id)
+        
+        inserted_count += 1
+        inserted_leads.append(new_lead.id)
+        
+    await db.commit()
+    
+    return ReraIngestResponse(
+        inserted_count=inserted_count,
+        skipped_count=skipped_count,
+        inserted_leads=inserted_leads,
+        skipped_details=skipped_details
+    )
 
 

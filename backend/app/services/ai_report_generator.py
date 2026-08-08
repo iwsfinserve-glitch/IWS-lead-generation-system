@@ -147,6 +147,14 @@ STATUS_LABELS = {
     "non_potential": "Non-Potential",
 }
 
+# Brand palette
+BRAND_BLUE = "#053abb"
+BRAND_GREEN = "#10b981"
+BRAND_AMBER = "#f59e0b"
+BRAND_PURPLE = "#8b5cf6"
+BRAND_RED = "#ef4444"
+CHART_PALETTE = [BRAND_BLUE, BRAND_GREEN, BRAND_AMBER, BRAND_PURPLE, BRAND_RED, "#0ea5e9", "#ec4899"]
+
 
 def _fig_to_png(fig) -> io.BytesIO:
     buf = io.BytesIO()
@@ -230,6 +238,108 @@ def _chart_team_comparison(members: list) -> io.BytesIO | None:
     return _fig_to_png(fig)
 
 
+def _chart_interaction_timeline(events_over_time: list) -> io.BytesIO | None:
+    """Line chart: interaction events per day for a lead's journey."""
+    if not events_over_time:
+        return None
+    dates = [e["date"] for e in events_over_time]
+    values = [e["events"] for e in events_over_time]
+    fig, ax = plt.subplots(figsize=(7, 3))
+    ax.plot(dates, values, marker="o", color=BRAND_BLUE, linewidth=2.2, markersize=5, markerfacecolor="white", markeredgewidth=2)
+    ax.fill_between(dates, values, alpha=0.12, color=BRAND_BLUE)
+    ax.set_xlabel("Date", color="#374151", fontsize=8)
+    ax.set_ylabel("Events", color="#374151", fontsize=8)
+    ax.set_title("Interaction Activity Over Time", fontweight="bold", color="#1e3a8a", pad=10)
+    ax.tick_params(axis="x", labelrotation=30, labelsize=7, colors="#374151")
+    ax.tick_params(axis="y", labelsize=7, colors="#374151")
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.set_ylim(bottom=0)
+    fig.patch.set_facecolor("#f8fafc")
+    fig.tight_layout()
+    return _fig_to_png(fig)
+
+
+def _chart_leads_over_time(leads_over_time: list) -> io.BytesIO | None:
+    """Dual-line / area chart: leads created vs converted over time."""
+    if not leads_over_time:
+        return None
+    dates = [e["date"] for e in leads_over_time]
+    created = [e["created"] for e in leads_over_time]
+    converted = [e["converted"] for e in leads_over_time]
+    fig, ax = plt.subplots(figsize=(7, 3.2))
+    ax.fill_between(dates, created, alpha=0.15, color=BRAND_BLUE)
+    ax.fill_between(dates, converted, alpha=0.18, color=BRAND_GREEN)
+    ax.plot(dates, created, marker="o", color=BRAND_BLUE, linewidth=2.2, markersize=5,
+            markerfacecolor="white", markeredgewidth=2, label="Created")
+    ax.plot(dates, converted, marker="s", color=BRAND_GREEN, linewidth=2.2, markersize=5,
+            markerfacecolor="white", markeredgewidth=2, label="Converted")
+    ax.set_xlabel("Date", color="#374151", fontsize=8)
+    ax.set_ylabel("Leads", color="#374151", fontsize=8)
+    ax.set_title("Leads Created vs Converted Over Time", fontweight="bold", color="#1e3a8a", pad=10)
+    ax.tick_params(axis="x", labelrotation=30, labelsize=7, colors="#374151")
+    ax.tick_params(axis="y", labelsize=7, colors="#374151")
+    ax.legend(fontsize=8, framealpha=0)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.set_ylim(bottom=0)
+    fig.patch.set_facecolor("#f8fafc")
+    fig.tight_layout()
+    return _fig_to_png(fig)
+
+
+def _chart_task_completion_trend(tasks_over_time: list) -> io.BytesIO | None:
+    """Line chart: tasks assigned vs completed per day."""
+    if not tasks_over_time:
+        return None
+    dates = [e["date"] for e in tasks_over_time]
+    assigned = [e["assigned"] for e in tasks_over_time]
+    completed = [e["completed"] for e in tasks_over_time]
+    fig, ax = plt.subplots(figsize=(7, 3))
+    ax.fill_between(dates, assigned, alpha=0.12, color=BRAND_BLUE)
+    ax.fill_between(dates, completed, alpha=0.18, color=BRAND_GREEN)
+    ax.plot(dates, assigned, marker="o", color=BRAND_BLUE, linewidth=2.2, markersize=5,
+            markerfacecolor="white", markeredgewidth=2, label="Assigned")
+    ax.plot(dates, completed, marker="s", color=BRAND_GREEN, linewidth=2.2, markersize=5,
+            markerfacecolor="white", markeredgewidth=2, label="Completed")
+    ax.set_xlabel("Date", color="#374151", fontsize=8)
+    ax.set_ylabel("Tasks", color="#374151", fontsize=8)
+    ax.set_title("Task Assignment & Completion Trend", fontweight="bold", color="#1e3a8a", pad=10)
+    ax.tick_params(axis="x", labelrotation=30, labelsize=7, colors="#374151")
+    ax.tick_params(axis="y", labelsize=7, colors="#374151")
+    ax.legend(fontsize=8, framealpha=0)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.set_ylim(bottom=0)
+    fig.patch.set_facecolor("#f8fafc")
+    fig.tight_layout()
+    return _fig_to_png(fig)
+
+
+def _chart_team_status_stacked(member_status_chart: list) -> io.BytesIO | None:
+    """Stacked bar chart: per-member lead status breakdown."""
+    if not member_status_chart:
+        return None
+    statuses = ["new", "in_progress", "potential", "converted_to_investor",
+                "existing_investor", "non_potential"]
+    names = [row["name"] for row in member_status_chart]
+    bottom_vals = [0] * len(names)
+    fig, ax = plt.subplots(figsize=(max(7, len(names) * 1.4), 3.8))
+    for status in statuses:
+        vals = [row.get(status, 0) for row in member_status_chart]
+        if sum(vals) == 0:
+            continue
+        color = STATUS_COLORS.get(status, "#94a3b8")
+        ax.bar(names, vals, bottom=bottom_vals, label=STATUS_LABELS.get(status, status), color=color, edgecolor="white")
+        bottom_vals = [b + v for b, v in zip(bottom_vals, vals)]
+    ax.set_ylabel("Leads", color="#374151", fontsize=8)
+    ax.set_title("Team Lead Status Distribution per Member", fontweight="bold", color="#1e3a8a", pad=10)
+    ax.tick_params(axis="x", labelrotation=15, labelsize=7.5, colors="#374151")
+    ax.tick_params(axis="y", labelsize=7, colors="#374151")
+    ax.legend(fontsize=7, loc="upper right", framealpha=0.8)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.patch.set_facecolor("#f8fafc")
+    fig.tight_layout()
+    return _fig_to_png(fig)
+
+
 def _embed_image(doc: Document, img_buf: io.BytesIO, caption: str = ""):
     """Add a chart image to the DOCX document."""
     doc.add_picture(img_buf, width=Inches(5.5))
@@ -279,44 +389,71 @@ def build_docx_report(
     # ── Embed charts based on report type ─────────────────────────────
     if metrics and report_type:
         charts_added = False
-        if report_type in ("periodic_leads",):
+        if report_type == "periodic_leads":
+            # Chart 1: Pipeline distribution (pie)
             img1 = _chart_pipeline_distribution(metrics.get("by_status", {}))
             if img1:
                 _embed_image(doc, img1, "Figure 1: Lead Pipeline Distribution")
                 charts_added = True
+            # Chart 2: Leads by channel (horizontal bar)
             img2 = _chart_by_source(metrics.get("by_source", {}))
             if img2:
                 _embed_image(doc, img2, "Figure 2: Leads by Acquisition Channel")
                 charts_added = True
+            # Chart 3: Leads created vs converted over time (line/area)
+            img3 = _chart_leads_over_time(metrics.get("leads_over_time", []))
+            if img3:
+                _embed_image(doc, img3, "Figure 3: Leads Created vs Converted Over Time")
+                charts_added = True
 
         elif report_type == "user_performance":
+            # Chart 1: Pipeline breakdown (bar)
             img1 = _chart_performance_bars(metrics)
             if img1:
                 _embed_image(doc, img1, "Figure 1: Lead Pipeline Breakdown")
                 charts_added = True
+            # Chart 2: Task completion trend (line)
+            img2 = _chart_task_completion_trend(metrics.get("tasks_over_time", []))
+            if img2:
+                _embed_image(doc, img2, "Figure 2: Task Assignment & Completion Trend")
+                charts_added = True
 
         elif report_type == "team_performance":
+            # Chart 1: Team leads assigned vs converted (grouped bar)
             members = metrics.get("members", [])
             img1 = _chart_team_comparison(members)
             if img1:
                 _embed_image(doc, img1, "Figure 1: Team Lead Performance")
                 charts_added = True
+            # Chart 2: Per-member status stacked bar
+            member_status_chart = metrics.get("member_status_chart", [])
+            img2 = _chart_team_status_stacked(member_status_chart)
+            if img2:
+                _embed_image(doc, img2, "Figure 2: Team Lead Status Distribution per Member")
+                charts_added = True
 
         elif report_type == "lead_journey":
+            # Chart 1: Event type bar chart (horizontal)
             by_type = metrics.get("by_event_type", {})
             if by_type:
                 labels = list(by_type.keys())
                 values = list(by_type.values())
                 fig, ax = plt.subplots(figsize=(6, 2.8))
-                ax.barh(labels, values, color="#1d4ed8", edgecolor="white")
+                ax.barh(labels, values, color=BRAND_BLUE, edgecolor="white")
                 ax.set_xlabel("Count", color="#374151")
                 ax.set_title("Interaction Events by Type", fontweight="bold",
                              color="#1e3a8a", pad=10)
                 ax.spines[["top", "right"]].set_visible(False)
+                ax.tick_params(labelsize=8, colors="#374151")
                 fig.patch.set_facecolor("#f8fafc")
                 fig.tight_layout()
                 img = _fig_to_png(fig)
                 _embed_image(doc, img, "Figure 1: Interaction Events by Type")
+                charts_added = True
+            # Chart 2: Interaction activity over time (line)
+            img2 = _chart_interaction_timeline(metrics.get("events_over_time", []))
+            if img2:
+                _embed_image(doc, img2, "Figure 2: Interaction Activity Over Time")
                 charts_added = True
 
         if charts_added:

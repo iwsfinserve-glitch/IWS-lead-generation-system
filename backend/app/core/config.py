@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # ── SEO Public Intake API ──────────────────────────────────────────
     SEO_WEB_API_KEY: str
 
+    # ── RERA Scraper API ───────────────────────────────────────────────
+    # Default key is secure and randomized, can be overridden in .env
+    RERA_SCRAPER_API_KEY: str = "rera_sk_8b5cf6e792a10b981f59e0b1f0ea5e9c34a9d7b4c6886e3f28c57ce4d56414f"
+
     @field_validator("SECRET_KEY", mode="before")
     @classmethod
     def validate_secret_key(cls, v: str) -> str:
