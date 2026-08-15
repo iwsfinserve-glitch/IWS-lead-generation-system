@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     # ── Gemini AI (report generation) ──────────────────────────────────
     GEMINI_API_KEY: str = ""
 
+    # ── Evolution API (WhatsApp self-hosted gateway) ───────────────────
+    EVOLUTION_API_URL: str = ""
+    EVOLUTION_API_KEY: str = ""
+
     # ── CORS ───────────────────────────────────────────────────────────
     # Comma-separated list of allowed origins. Default permits the local
     # Streamlit dev server. Override in .env for production.

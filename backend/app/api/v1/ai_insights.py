@@ -93,6 +93,7 @@ async def _build_lead_scoring_context(lead: Lead, db: AsyncSession) -> dict:
     breakdown: dict[str, int] = {}
     last_interaction_date = None
     notes_fragments: list[str] = []
+    whatsapp_fragments: list[str] = []
 
     for entry in sorted(timeline, key=lambda e: e.created_at, reverse=True):
         etype = entry.event_type
@@ -104,6 +105,13 @@ async def _build_lead_scoring_context(lead: Lead, db: AsyncSession) -> dict:
             note_text = entry.event_metadata.get("note") or entry.event_metadata.get("text", "")
             if note_text:
                 notes_fragments.append(str(note_text)[:200])
+        # Collect WhatsApp message previews (first 10 for AI context)
+        if etype == "whatsapp_message" and len(whatsapp_fragments) < 10:
+            direction = entry.event_metadata.get("direction", "?")
+            preview = entry.event_metadata.get("content_preview", "")
+            if preview:
+                label = "Customer" if direction == "inbound" else "Rep"
+                whatsapp_fragments.append(f"[{label}]: {preview[:150]}")
 
     # ── Appointment summary ──────────────────────────────────────────────
     appointments = lead.appointments or []
@@ -111,6 +119,12 @@ async def _build_lead_scoring_context(lead: Lead, db: AsyncSession) -> dict:
     for appt in appointments:
         outcome = f"{appt.title} ({appt.mode.value if appt.mode else '?'})"
         outcomes.append(outcome)
+
+    # ── WhatsApp conversation summary ────────────────────────────────────
+    wa_count = breakdown.get("whatsapp_message", 0)
+    whatsapp_summary = None
+    if whatsapp_fragments:
+        whatsapp_summary = f"{wa_count} WhatsApp messages. Recent excerpts:\n" + "\n".join(whatsapp_fragments)
 
     return {
         "lead_id": lead.id,
@@ -124,6 +138,7 @@ async def _build_lead_scoring_context(lead: Lead, db: AsyncSession) -> dict:
         "interaction_notes_summary": " | ".join(notes_fragments) or None,
         "appointment_count": len(appointments),
         "appointment_outcomes": outcomes[:5],  # Cap at 5 to keep prompt lean
+        "whatsapp_summary": whatsapp_summary,
     }
 
 

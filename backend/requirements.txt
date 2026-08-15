@@ -38,3 +38,6 @@ apscheduler
 
 # ── File Parsing ──
 openpyxl
+
+# ── WhatsApp (Evolution API HTTP client) ──
+httpx

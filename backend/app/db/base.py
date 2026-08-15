@@ -29,4 +29,5 @@ from app.models.interaction import TaskDueDateRequest, Notification  # noqa: E40
 from app.models.interaction import LeadTransferRequest               # noqa: E402, F401
 from app.models.interaction import LeadUpdateRequest                 # noqa: E402, F401
 from app.models.ai_insight import LeadAIInsight                      # noqa: E402, F401
+from app.models.whatsapp_message import WhatsAppMessage              # noqa: E402, F401
 

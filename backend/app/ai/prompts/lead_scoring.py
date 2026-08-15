@@ -80,6 +80,7 @@ def build_lead_scoring_context(data: dict) -> str:
         f"- Interaction notes summary: {_v('interaction_notes_summary')}\n"
         f"- Total appointments: {_v('appointment_count', '0')}\n"
         f"- Appointment outcomes: {outcomes_str}\n"
+        f"- WhatsApp conversation summary: {_v('whatsapp_summary')}\n"
     )
 
     return LEAD_SCORING_PROMPT_TEMPLATE.format(lead_profile=lead_profile)

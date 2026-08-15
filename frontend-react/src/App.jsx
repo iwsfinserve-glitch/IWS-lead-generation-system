@@ -18,6 +18,8 @@ import UserDetailsPage  from './pages/UserDetailsPage';
 import UsersPage        from './pages/UsersPage';
 import MyTeamPage       from './pages/MyTeamPage';
 import LeadUpdateRequestsPage from './pages/LeadUpdateRequestsPage';
+import WhatsAppInbox from './pages/WhatsAppInbox';
+import WhatsAppWidget from './components/chat/WhatsAppWidget';
 
 // Layout wrapper for authenticated pages
 function AppLayout() {
@@ -52,6 +54,7 @@ function AppLayout() {
       <div className="main-content">
         <Outlet context={{ toggleSidebar }} />
       </div>
+      <WhatsAppWidget />
     </div>
   );
 }
@@ -92,6 +95,7 @@ export default function App() {
             <Route path="/appointments"     element={<AppointmentsPage />} />
             <Route path="/tasks"            element={<TasksPage />} />
             <Route path="/emails"           element={<EmailLeadsPage />} />
+            <Route path="/chats"            element={<WhatsAppInbox />} />
             <Route path="/reports"          element={<ReportsPage />} />
             <Route path="/users"            element={
               <ProtectedRoute roles={['admin', 'manager']}>

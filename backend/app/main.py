@@ -21,6 +21,7 @@ from app.core.scheduler import scheduler, setup_scheduler, _reconcile_appointmen
 from app.api.v1 import auth, sources, leads, appointments, tasks, reports
 from app.api.v1 import due_date_requests, notifications, lead_transfers, ai_insights
 from app.api.v1 import lead_update_requests, emails
+from app.api.v1 import whatsapp
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -107,6 +108,7 @@ app.include_router(lead_transfers.router, prefix="/api/v1")
 app.include_router(ai_insights.router, prefix="/api/v1")
 app.include_router(lead_update_requests.router, prefix="/api/v1")
 app.include_router(emails.router, prefix="/api/v1")
+app.include_router(whatsapp.router, prefix="/api/v1")
 
 @app.get("/health", tags=["Health"])
 async def health_check():

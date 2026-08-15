@@ -71,6 +71,9 @@ class User(Base):
         "Notification", back_populates="user",
         foreign_keys="[Notification.user_id]", lazy="noload",
     )
+    whatsapp_messages: Mapped[list["WhatsAppMessage"]] = relationship(  # noqa: F821
+        "WhatsAppMessage", back_populates="user", lazy="noload",
+    )
 
     # ── Role helper properties ────────────────────────────────────────
     @property

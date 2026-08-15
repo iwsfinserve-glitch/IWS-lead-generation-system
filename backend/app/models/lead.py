@@ -136,6 +136,9 @@ class Lead(Base):
         "LeadAIInsight", back_populates="lead",
         cascade="all, delete-orphan", lazy="select",
     )
+    whatsapp_messages: Mapped[list["WhatsAppMessage"]] = relationship(  # noqa: F821
+        "WhatsAppMessage", back_populates="lead", lazy="noload",
+    )
 
     def __repr__(self) -> str:
         return f"<Lead id={self.id} name={self.name!r} status={self.status.value}>"

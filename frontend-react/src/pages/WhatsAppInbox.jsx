@@ -1,0 +1,347 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useOutletContext } from 'react-router-dom';
+import {
+  MessageCircle, Send, Search, Phone, User, ArrowLeft,
+  Wifi, WifiOff, Settings, ChevronRight, Clock, CheckCheck
+} from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { getWhatsAppChats, getChatMessages, sendWhatsAppMessage, getInstanceStatus } from '../api/whatsappApi';
+import WhatsAppConnectModal from '../components/modals/WhatsAppConnectModal';
+import Navbar from '../components/layout/Navbar';
+import toast from 'react-hot-toast';
+
+/**
+ * Full-page WhatsApp Inbox — split-pane chat interface.
+ *
+ * Left panel:  Contact list (leads with WhatsApp conversations)
+ * Right panel: Chat thread with message input
+ */
+export default function WhatsAppInbox() {
+  const { toggleSidebar } = useOutletContext();
+  const { user } = useAuth();
+  const instanceName = `rep_${user?.id}`;
+
+  // ── State ──────────────────────────────────────────────────────────
+  const [chats, setChats] = useState([]);
+  const [selectedLeadId, setSelectedLeadId] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('checking'); // checking | open | close
+  const [showConnectModal, setShowConnectModal] = useState(false);
+  const [mobileShowChat, setMobileShowChat] = useState(false);
+
+  const messagesEndRef = useRef(null);
+  const chatPollRef = useRef(null);
+  const msgPollRef = useRef(null);
+
+  // ── Load chats ─────────────────────────────────────────────────────
+  const loadChats = useCallback(async () => {
+    try {
+      const data = await getWhatsAppChats();
+      setChats(data);
+    } catch {
+      // Silent — chats may be empty
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // ── Check connection status ────────────────────────────────────────
+  useEffect(() => {
+    async function checkStatus() {
+      try {
+        const result = await getInstanceStatus(instanceName);
+        setConnectionStatus(result.status === 'open' ? 'open' : 'close');
+      } catch {
+        setConnectionStatus('close');
+      }
+    }
+    checkStatus();
+  }, [instanceName]);
+
+  // ── Initial load + polling ─────────────────────────────────────────
+  useEffect(() => {
+    loadChats();
+    chatPollRef.current = setInterval(loadChats, 15000); // Refresh chat list every 15s
+    return () => {
+      if (chatPollRef.current) clearInterval(chatPollRef.current);
+    };
+  }, [loadChats]);
+
+  // ── Load messages for selected lead ────────────────────────────────
+  const loadMessages = useCallback(async () => {
+    if (!selectedLeadId) return;
+    try {
+      const data = await getChatMessages(selectedLeadId);
+      setMessages(data);
+    } catch (err) {
+      toast.error('Failed to load messages');
+    }
+  }, [selectedLeadId]);
+
+  useEffect(() => {
+    if (selectedLeadId) {
+      loadMessages();
+      // Poll for new messages every 5s when a chat is open
+      msgPollRef.current = setInterval(loadMessages, 5000);
+    }
+    return () => {
+      if (msgPollRef.current) clearInterval(msgPollRef.current);
+    };
+  }, [selectedLeadId, loadMessages]);
+
+  // ── Auto-scroll to bottom ─────────────────────────────────────────
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // ── Send message ──────────────────────────────────────────────────
+  const handleSend = async (e) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !selectedLeadId || sending) return;
+
+    setSending(true);
+    try {
+      const sentMsg = await sendWhatsAppMessage(selectedLeadId, newMessage.trim());
+      setMessages((prev) => [...prev, sentMsg]);
+      setNewMessage('');
+      // Refresh chat list to update last message preview
+      loadChats();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to send message');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // ── Select a chat ─────────────────────────────────────────────────
+  const handleSelectChat = (leadId) => {
+    setSelectedLeadId(leadId);
+    setMobileShowChat(true);
+  };
+
+  const handleBackToList = () => {
+    setMobileShowChat(false);
+  };
+
+  // ── Filter chats by search ────────────────────────────────────────
+  const filteredChats = chats.filter((c) =>
+    c.lead_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    c.lead_phone.includes(searchQuery)
+  );
+
+  const selectedChat = chats.find((c) => c.lead_id === selectedLeadId);
+
+  // ── Format timestamp ──────────────────────────────────────────────
+  const formatTime = (ts) => {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    if (isToday) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  };
+
+  const formatMessageTime = (ts) => {
+    if (!ts) return '';
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  return (
+    <>
+      <Navbar title="WhatsApp" onMenuClick={toggleSidebar} />
+
+      <div className="wa-inbox-container">
+        {/* ── Left Panel: Chat List ── */}
+        <div className={`wa-chat-list ${mobileShowChat ? 'wa-hide-mobile' : ''}`}>
+          {/* Connection Status Bar */}
+          <div className="wa-status-bar">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {connectionStatus === 'open' ? (
+                <><Wifi size={14} color="var(--success)" /><span style={{ color: 'var(--success)', fontSize: '0.78rem' }}>Connected</span></>
+              ) : (
+                <><WifiOff size={14} color="var(--danger)" /><span style={{ color: 'var(--danger)', fontSize: '0.78rem' }}>Disconnected</span></>
+              )}
+            </div>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setShowConnectModal(true)}
+              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+              id="wa-connect-btn"
+            >
+              <Settings size={12} /> {connectionStatus === 'open' ? 'Manage' : 'Connect'}
+            </button>
+          </div>
+
+          {/* Search */}
+          <div className="wa-search-box">
+            <Search size={14} color="var(--text-muted)" />
+            <input
+              type="text"
+              placeholder="Search contacts..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="wa-search-input"
+              id="wa-search-input"
+            />
+          </div>
+
+          {/* Chat items */}
+          <div className="wa-chat-items">
+            {loading ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                Loading chats...
+              </div>
+            ) : filteredChats.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+                <MessageCircle size={36} style={{ opacity: 0.3, marginBottom: 8 }} />
+                <p style={{ fontSize: '0.85rem', margin: 0 }}>No WhatsApp conversations yet</p>
+                <p style={{ fontSize: '0.78rem', margin: '4px 0 0' }}>
+                  {connectionStatus === 'open'
+                    ? 'Messages from your leads will appear here'
+                    : 'Connect your WhatsApp to get started'}
+                </p>
+              </div>
+            ) : (
+              filteredChats.map((chat) => (
+                <div
+                  key={chat.lead_id}
+                  className={`wa-chat-item ${selectedLeadId === chat.lead_id ? 'active' : ''}`}
+                  onClick={() => handleSelectChat(chat.lead_id)}
+                  id={`wa-chat-${chat.lead_id}`}
+                >
+                  <div className="wa-chat-avatar">
+                    {chat.lead_name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="wa-chat-info">
+                    <div className="wa-chat-header">
+                      <span className="wa-chat-name">{chat.lead_name}</span>
+                      <span className="wa-chat-time">{formatTime(chat.last_message_time)}</span>
+                    </div>
+                    <div className="wa-chat-preview">
+                      <span className="wa-chat-last-msg">
+                        {chat.direction === 'outbound' && <CheckCheck size={12} style={{ marginRight: 3, opacity: 0.5 }} />}
+                        {chat.last_message || 'No messages'}
+                      </span>
+                      {chat.unread_count > 0 && (
+                        <span className="wa-unread-badge">{chat.unread_count}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* ── Right Panel: Chat Thread ── */}
+        <div className={`wa-chat-thread ${mobileShowChat ? 'wa-show-mobile' : ''}`}>
+          {selectedLeadId && selectedChat ? (
+            <>
+              {/* Chat Header */}
+              <div className="wa-thread-header">
+                <button className="wa-back-btn" onClick={handleBackToList}>
+                  <ArrowLeft size={18} />
+                </button>
+                <div className="wa-chat-avatar" style={{ width: 36, height: 36, fontSize: '0.85rem' }}>
+                  {selectedChat.lead_name.charAt(0).toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{selectedChat.lead_name}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    <Phone size={10} style={{ marginRight: 3 }} />
+                    {selectedChat.lead_phone}
+                    {selectedChat.lead_status && (
+                      <span className="wa-status-pill">{selectedChat.lead_status.replace(/_/g, ' ')}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Messages */}
+              <div className="wa-messages-area">
+                {messages.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                    <MessageCircle size={40} style={{ opacity: 0.2, marginBottom: 8 }} />
+                    <p style={{ fontSize: '0.85rem' }}>No messages yet. Start a conversation!</p>
+                  </div>
+                ) : (
+                  messages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      className={`wa-message-bubble ${msg.direction === 'outbound' ? 'outbound' : 'inbound'}`}
+                    >
+                      <div className="wa-bubble-content">
+                        {msg.media_type && (
+                          <div className="wa-media-badge">
+                            📎 {msg.media_type}
+                          </div>
+                        )}
+                        <p className="wa-bubble-text">{msg.content || '[Media]'}</p>
+                        <span className="wa-bubble-time">
+                          {formatMessageTime(msg.timestamp)}
+                          {msg.direction === 'outbound' && (
+                            <CheckCheck size={12} style={{ marginLeft: 3, color: msg.status === 'read' ? '#53bdeb' : 'inherit' }} />
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Message Input */}
+              <form className="wa-input-bar" onSubmit={handleSend}>
+                <input
+                  type="text"
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  placeholder="Type a message..."
+                  className="wa-message-input"
+                  disabled={sending || connectionStatus !== 'open'}
+                  id="wa-message-input"
+                />
+                <button
+                  type="submit"
+                  className="wa-send-btn"
+                  disabled={!newMessage.trim() || sending || connectionStatus !== 'open'}
+                  id="wa-send-btn"
+                >
+                  <Send size={18} />
+                </button>
+              </form>
+            </>
+          ) : (
+            <div className="wa-empty-state">
+              <div className="wa-empty-icon">
+                <MessageCircle size={56} />
+              </div>
+              <h3 style={{ margin: '16px 0 6px' }}>WhatsApp Inbox</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', maxWidth: 320 }}>
+                Select a conversation from the left panel to view messages, or wait for your leads to message you.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Connect Modal */}
+      {showConnectModal && (
+        <WhatsAppConnectModal
+          onClose={() => setShowConnectModal(false)}
+          onConnected={() => {
+            setConnectionStatus('open');
+            loadChats();
+          }}
+        />
+      )}
+    </>
+  );
+}
