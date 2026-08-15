@@ -8,7 +8,7 @@ State machine (automated transitions only):
     pending + 7 days        → escalates to rep's manager (manager_alerted = True,
                                records manager_alerted_at)
 
-    manager_alerted + 2d    → escalates to all admins (admin_alerted = True)
+    manager_alerted + 4d    → escalates to all admins (admin_alerted = True)
 
 Manual transitions (upcoming/pending -> completed) are handled via the
 PATCH /appointments/{id} endpoint using AppointmentUpdate.status = "completed".
@@ -28,7 +28,7 @@ from app.services.notification_service import create_notification
 logger = logging.getLogger(__name__)
 
 _7_DAYS = timedelta(days=7)
-_2_DAYS = timedelta(days=2)
+_4_DAYS = timedelta(days=4)
 
 
 async def reconcile_appointment_statuses(db: AsyncSession) -> None:
@@ -43,7 +43,7 @@ async def reconcile_appointment_statuses(db: AsyncSession) -> None:
     """
     now = datetime.now(timezone.utc)
     seven_days_ago = now - _7_DAYS
-    two_days_ago = now - _2_DAYS
+    four_days_ago = now - _4_DAYS
 
     # ── Tier 1: upcoming -> pending ──────────────────────────────────
     # Fetch rows (not a bulk UPDATE) so we can send per-row notifications.
@@ -120,13 +120,13 @@ async def reconcile_appointment_statuses(db: AsyncSession) -> None:
     if to_escalate:
         logger.info(f"Reconcile: {len(to_escalate)} appointment(s) escalated to manager (Tier 2).")
 
-    # ── Tier 3: manager alerted + 2 days -> escalate to admin ────────
+    # ── Tier 3: manager alerted + 4 days -> escalate to admin ────────
     result3 = await db.execute(
         select(Appointment).where(
             Appointment.status == "pending",
             Appointment.manager_alerted == True,         # noqa: E712
             Appointment.manager_alerted_at != None,      # noqa: E711
-            Appointment.manager_alerted_at <= two_days_ago,
+            Appointment.manager_alerted_at <= four_days_ago,
             Appointment.admin_alerted == False,          # noqa: E712
         ).execution_options(populate_existing=True)
     )
@@ -155,7 +155,7 @@ async def reconcile_appointment_statuses(db: AsyncSession) -> None:
                 notification_type="appointment_escalation_admin",
                 message=(
                     f"{rep_name}'s appointment with {lead_name} on {date_str} "
-                    f"remains pending 2 days after the manager was alerted."
+                    f"remains pending 4 days after the manager was alerted."
                 ),
                 link_type="appointment",
                 link_id=appt.id,

@@ -10,7 +10,7 @@ Escalation tiers (automated):
             → notify the assigning manager (or all managers if no assigner)
             → set manager_alerted = True, record manager_alerted_at
 
-    Tier 3: still incomplete 2 days after manager was alerted
+    Tier 3: still incomplete 4 days after manager was alerted
             → notify all admins
             → set admin_alerted = True
 
@@ -32,7 +32,7 @@ from app.services.notification_service import create_notification
 logger = logging.getLogger(__name__)
 
 _7_DAYS = timedelta(days=7)
-_2_DAYS = timedelta(days=2)
+_4_DAYS = timedelta(days=4)
 
 
 async def reconcile_task_statuses(db: AsyncSession) -> None:
@@ -47,7 +47,7 @@ async def reconcile_task_statuses(db: AsyncSession) -> None:
     """
     now = datetime.now(timezone.utc)
     seven_days_ago = now - _7_DAYS
-    two_days_ago = now - _2_DAYS
+    four_days_ago = now - _4_DAYS
 
     # ── Tier 1: Notify rep when task goes overdue ─────────────────────
     result = await db.execute(
@@ -134,13 +134,13 @@ async def reconcile_task_statuses(db: AsyncSession) -> None:
     if tier2_tasks:
         logger.info(f"Reconcile: {len(tier2_tasks)} task(s) escalated to manager (Tier 2).")
 
-    # ── Tier 3: Escalate to admin 2 days after manager was alerted ───
+    # ── Tier 3: Escalate to admin 4 days after manager was alerted ───
     result3 = await db.execute(
         select(Task).where(
             Task.status == "needsAction",
             Task.manager_alerted == True,           # noqa: E712
             Task.manager_alerted_at != None,        # noqa: E711
-            Task.manager_alerted_at <= two_days_ago,
+            Task.manager_alerted_at <= four_days_ago,
             Task.admin_alerted == False,            # noqa: E712
         )
     )
@@ -168,7 +168,7 @@ async def reconcile_task_statuses(db: AsyncSession) -> None:
                 title="Task Unresolved — Admin Escalation",
                 message=(
                     f"{rep_name}'s task '{task.title}' (due {due_str}) "
-                    f"remains incomplete 2 days after the manager was alerted."
+                    f"remains incomplete 4 days after the manager was alerted."
                 ),
                 notification_type="task_escalation_admin",
                 link_type="task",
