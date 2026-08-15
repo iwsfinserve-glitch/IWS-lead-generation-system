@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/layout/ProtectedRoute';
@@ -25,6 +25,7 @@ import WhatsAppWidget from './components/chat/WhatsAppWidget';
 function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);  // mobile: is sidebar drawer open
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false); // desktop: icon-only rail
+  const location = useLocation();
 
   const closeSidebar = () => setSidebarOpen(false);
   const toggleSidebar = () => setSidebarOpen((prev) => !prev);
@@ -54,7 +55,7 @@ function AppLayout() {
       <div className="main-content">
         <Outlet context={{ toggleSidebar }} />
       </div>
-      <WhatsAppWidget />
+      {location.pathname !== '/chats' && <WhatsAppWidget />}
     </div>
   );
 }
