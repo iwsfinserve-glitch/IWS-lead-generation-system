@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.lead import Lead
 from app.models.user import User
-from app.models.interaction import LeadTimeline
+from app.models.interaction import LeadTimeline, Notification
 from app.models.whatsapp_message import WhatsAppMessage, MessageDirection, MessageStatus
 
 logger = logging.getLogger(__name__)
@@ -207,8 +207,8 @@ async def process_incoming_message(
     )
     db.add(msg)
 
-    # 4. Log to LeadTimeline (only if matched to a lead)
-    if lead_id:
+    # 4. Log to LeadTimeline and create in-app Notification (only if matched to a lead)
+    if lead_id and user_id:
         preview = (content or "")[:200]
         timeline_entry = LeadTimeline(
             lead_id=lead_id,
@@ -222,6 +222,18 @@ async def process_incoming_message(
             },
         )
         db.add(timeline_entry)
+
+        # In-app notification for the sales rep
+        lead_display = lead.name or sender_phone
+        notif = Notification(
+            user_id=user_id,
+            title=f"WhatsApp from {lead_display}",
+            message=f"{preview or '[Media]'}",
+            notification_type="whatsapp_message",
+            link_type="lead",
+            link_id=lead_id,
+        )
+        db.add(notif)
 
     await db.commit()
     await db.refresh(msg)
