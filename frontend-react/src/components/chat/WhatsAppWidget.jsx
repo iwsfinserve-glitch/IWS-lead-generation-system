@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  MessageCircle, Send, X, Minimize2, Maximize2,
+  MessageCircle, Send, X, Trash2,
   ChevronRight, CheckCheck, ArrowLeft
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { getWhatsAppChats, getChatMessages, sendWhatsAppMessage } from '../../api/whatsappApi';
+import { getWhatsAppChats, getChatMessages, sendWhatsAppMessage, deleteWhatsAppChat } from '../../api/whatsappApi';
 import toast from 'react-hot-toast';
 
 /**
@@ -72,6 +72,25 @@ export default function WhatsAppWidget() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const handleBack = () => {
+    setView('list');
+    setSelectedLeadId(null);
+  };
+
+  const handleDeleteChat = async () => {
+    if (!selectedLeadId) return;
+    if (!window.confirm('Are you sure you want to delete this chat from the CRM?')) return;
+    
+    try {
+      await deleteWhatsAppChat(selectedLeadId);
+      toast.success('Chat deleted');
+      handleBack();
+      loadChats();
+    } catch (err) {
+      toast.error('Failed to delete chat');
+    }
+  };
+
   // ── Send message ──────────────────────────────────────────────────
   const handleSend = async (e) => {
     e.preventDefault();
@@ -94,10 +113,6 @@ export default function WhatsAppWidget() {
     setView('chat');
   };
 
-  const handleBack = () => {
-    setView('list');
-    setSelectedLeadId(null);
-  };
 
   const selectedChat = chats.find((c) => c.lead_id === selectedLeadId);
 
@@ -140,15 +155,25 @@ export default function WhatsAppWidget() {
               </button>
             )}
             <MessageCircle size={16} />
-            <span style={{ fontWeight: 600, fontSize: '0.85rem', flex: 1 }}>
+            <span style={{ fontWeight: 600, fontSize: '0.85rem', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {view === 'chat' && selectedChat ? selectedChat.lead_name : 'WhatsApp'}
             </span>
-            <button onClick={() => setIsOpen(false)} style={{
-              background: 'none', border: 'none', cursor: 'pointer', color: '#fff',
-              display: 'flex', padding: 2,
-            }}>
-              <X size={16} />
-            </button>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {view === 'chat' && (
+                <button onClick={handleDeleteChat} title="Delete chat" style={{
+                  background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.8)',
+                  display: 'flex', padding: 4,
+                }}>
+                  <Trash2 size={15} />
+                </button>
+              )}
+              <button onClick={() => setIsOpen(false)} style={{
+                background: 'none', border: 'none', cursor: 'pointer', color: '#fff',
+                display: 'flex', padding: 4,
+              }}>
+                <X size={16} />
+              </button>
+            </div>
           </div>
 
           {/* Body */}

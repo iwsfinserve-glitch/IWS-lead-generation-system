@@ -2,10 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import {
   MessageCircle, Send, Search, Phone, User, ArrowLeft,
-  Wifi, WifiOff, Settings, ChevronRight, Clock, CheckCheck, Plus
+  Wifi, WifiOff, Settings, ChevronRight, Clock, CheckCheck, Plus, Trash2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { getWhatsAppChats, getChatMessages, sendWhatsAppMessage, getInstanceStatus } from '../api/whatsappApi';
+import { getWhatsAppChats, getChatMessages, sendWhatsAppMessage, getInstanceStatus, deleteWhatsAppChat } from '../api/whatsappApi';
 import WhatsAppConnectModal from '../components/modals/WhatsAppConnectModal';
 import StartChatModal from '../components/modals/StartChatModal';
 import Navbar from '../components/layout/Navbar';
@@ -127,6 +127,22 @@ export default function WhatsAppInbox() {
 
   const handleBackToList = () => {
     setMobileShowChat(false);
+  };
+
+  // ── Delete chat ───────────────────────────────────────────────────
+  const handleDeleteChat = async () => {
+    if (!selectedLeadId) return;
+    if (!window.confirm('Are you sure you want to delete this chat from the CRM?')) return;
+    
+    try {
+      await deleteWhatsAppChat(selectedLeadId);
+      toast.success('Chat deleted');
+      setSelectedLeadId(null);
+      setMobileShowChat(false);
+      loadChats();
+    } catch (err) {
+      toast.error('Failed to delete chat');
+    }
   };
 
   // ── Filter chats by search ────────────────────────────────────────
@@ -275,6 +291,14 @@ export default function WhatsAppInbox() {
                     )}
                   </div>
                 </div>
+                <button
+                  className="btn btn-ghost"
+                  onClick={handleDeleteChat}
+                  style={{ padding: '6px 8px', color: 'var(--danger)' }}
+                  title="Delete chat from CRM"
+                >
+                  <Trash2 size={16} />
+                </button>
               </div>
 
               {/* Messages */}

@@ -2,16 +2,17 @@
 WhatsApp API Routes — webhook receiver, chat management, and instance control.
 
 Mounted at /api/v1 by main.py, so routes resolve to:
-    POST /api/v1/whatsapp/webhook                       (Evolution API webhook)
-    GET  /api/v1/whatsapp/chats                         (List chats for current rep)
-    GET  /api/v1/whatsapp/chats/{lead_id}               (Message history for a lead)
-    POST /api/v1/whatsapp/chats/{lead_id}/send          (Send message to a lead)
-    POST /api/v1/whatsapp/chats/{lead_id}/sync-history  (Import historical messages from Evo API)
-    GET  /api/v1/whatsapp/leads/without-chats           (Leads with no WhatsApp messages yet)
-    POST /api/v1/whatsapp/instances/create              (Create a WhatsApp session)
-    GET  /api/v1/whatsapp/instances/qr/{name}           (Fetch QR code for scanning)
-    GET  /api/v1/whatsapp/instances/status/{name}       (Check connection status)
-    GET  /api/v1/whatsapp/instances                     (List all instances)
+    POST   /api/v1/whatsapp/webhook                       (Evolution API webhook)
+    GET    /api/v1/whatsapp/chats                         (List chats for current rep)
+    GET    /api/v1/whatsapp/chats/{lead_id}               (Message history for a lead)
+    POST   /api/v1/whatsapp/chats/{lead_id}/send          (Send message to a lead)
+    DELETE /api/v1/whatsapp/chats/{lead_id}               (Delete a chat conversation)
+    POST   /api/v1/whatsapp/chats/{lead_id}/sync-history  (Import historical messages from Evo API)
+    GET    /api/v1/whatsapp/leads/without-chats           (Leads with no WhatsApp messages yet)
+    POST   /api/v1/whatsapp/instances/create              (Create a WhatsApp session)
+    GET    /api/v1/whatsapp/instances/qr/{name}           (Fetch QR code for scanning)
+    GET    /api/v1/whatsapp/instances/status/{name}       (Check connection status)
+    GET    /api/v1/whatsapp/instances                     (List all instances)
 """
 
 import logging
@@ -584,3 +585,36 @@ async def sync_chat_history(
         await db.commit()
 
     return {"imported": imported, "lead_id": lead_id}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Delete Chat
+# ═══════════════════════════════════════════════════════════════════════
+
+@router.delete("/chats/{lead_id}")
+async def delete_chat(
+    lead_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete all WhatsApp messages associated with a lead.
+
+    This hides the chat from the inbox. The actual messages on the WhatsApp
+    app itself are not deleted, only the CRM records.
+    """
+    from sqlalchemy import delete
+
+    # Check permission
+    lead = await db.get(Lead, lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if current_user.is_sales_rep and lead.assigned_rep_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Delete messages
+    await db.execute(
+        delete(WhatsAppMessage).where(WhatsAppMessage.lead_id == lead_id)
+    )
+    await db.commit()
+
+    return {"status": "success", "message": "Chat deleted"}

@@ -11,6 +11,9 @@ export const getChatMessages = (leadId) =>
 export const sendWhatsAppMessage = (leadId, content) =>
   api.post(`/whatsapp/chats/${leadId}/send`, { content }).then((r) => r.data);
 
+export const deleteWhatsAppChat = (leadId) =>
+  api.delete(`/whatsapp/chats/${leadId}`).then((r) => r.data);
+
 // ── Instance management ───────────────────────────────────────────────
 
 export const createWhatsAppInstance = (instanceName) =>
