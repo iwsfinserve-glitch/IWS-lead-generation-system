@@ -18,7 +18,7 @@ export default function BulkAssignModal({ onClose, onAssigned, selectedLeads }) 
 
   const handleSubmit = async () => {
     if (!targetRepId) {
-      toast.error('Please select a target sales representative.');
+      toast.error('Please select a target RM.');
       return;
     }
     
@@ -53,7 +53,7 @@ export default function BulkAssignModal({ onClose, onAssigned, selectedLeads }) 
             value={targetRepId} 
             onChange={(e) => setTargetRepId(e.target.value)}
           >
-            <option value="">Select a sales rep…</option>
+            <option value="">Select an RM…</option>
             {reps.filter(r => r.role === 'sales_rep').map((r) => (
               <option key={r.id} value={r.id}>{r.name}</option>
             ))}

@@ -72,7 +72,7 @@ export default function MyTeamPage() {
           <div className="empty-state">
             <div className="empty-state-icon"><Users size={48} /></div>
             <div className="empty-state-title">No direct reports yet</div>
-            <div className="empty-state-desc">Sales reps assigned to you will appear here.</div>
+            <div className="empty-state-desc">RMs assigned to you will appear here.</div>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>

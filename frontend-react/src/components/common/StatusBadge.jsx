@@ -37,7 +37,7 @@ export const ROLE_BADGE = {
 export const ROLE_LABEL = {
   admin: 'Admin',
   manager: 'Manager',
-  sales_rep: 'Sales Rep',
+  sales_rep: 'RM',
 };
 
 export function StatusBadge({ status }) {

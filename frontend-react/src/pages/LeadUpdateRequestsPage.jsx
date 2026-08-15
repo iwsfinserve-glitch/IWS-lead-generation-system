@@ -112,7 +112,7 @@ export default function LeadUpdateRequestsPage() {
           <div>
             <h1 style={{ margin: 0, marginBottom: 4 }}>Lead Update Requests</h1>
             <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.875rem' }}>
-              Sales reps request contact field changes here — review the before/after diff and approve or reject.
+              RMs request contact field changes here — review the before/after diff and approve or reject.
             </p>
           </div>
         </div>

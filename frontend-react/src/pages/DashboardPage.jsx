@@ -513,7 +513,7 @@ function AdminDashboard() {
         <MetricCard label="Total Users" value={users.length} icon={Users} />
         <MetricCard label="Admins"      value={admins}       icon={Users} color="var(--primary-light)" />
         <MetricCard label="Managers"    value={managers}     icon={Users} color="var(--accent)" />
-        <MetricCard label="Sales Reps"  value={reps}         icon={Users} color="var(--success)" />
+        <MetricCard label="RMs"  value={reps}         icon={Users} color="var(--success)" />
       </div>
 
       <div className="page-header">

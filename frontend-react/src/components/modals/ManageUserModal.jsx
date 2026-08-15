@@ -86,7 +86,7 @@ export default function ManageUserModal({ user: existingUser, onClose, onSaved }
         <div className="form-group">
           <label className="form-label">Role</label>
           <select className="form-select" value={form.role} onChange={(e) => set('role', e.target.value)} id="user-role">
-            <option value="sales_rep">Sales Rep</option>
+            <option value="sales_rep">RM</option>
             <option value="manager">Manager</option>
             <option value="admin">Admin</option>
           </select>

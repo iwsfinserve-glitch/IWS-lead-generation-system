@@ -71,8 +71,8 @@ export default function LoginPage() {
           }}>
             <img src="/iws_logo_png.png" alt="IWS Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
           </div>
-          <h1 style={{ fontSize: '1.75rem', marginBottom: 6 }}>Lead Management</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>IWS Finserv CRM — Sign in to your account</p>
+          <h1 style={{ fontSize: '1.75rem', marginBottom: 6 }}>IWS CRM System</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Sign in to your account</p>
         </div>
 
         {/* Card */}
@@ -141,7 +141,7 @@ export default function LoginPage() {
         </div>
 
         <p style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 24 }}>
-          IWS Finserv Lead Management System © {new Date().getFullYear()}
+          IWS CRM System © {new Date().getFullYear()}
         </p>
       </div>
     </div>

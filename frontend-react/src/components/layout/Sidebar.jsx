@@ -29,7 +29,7 @@ function getInitials(name = '') {
   return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
 }
 
-const ROLE_LABELS = { admin: 'Admin', manager: 'Manager', sales_rep: 'Sales Rep' };
+const ROLE_LABELS = { admin: 'Admin', manager: 'Manager', sales_rep: 'RM' };
 
 // ── Logout confirmation modal ──────────────────────────────────────────────
 function LogoutConfirmModal({ onConfirm, onCancel }) {

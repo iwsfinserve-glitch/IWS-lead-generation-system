@@ -716,7 +716,7 @@ export default function ReportsPage() {
           <div className="glass-card" style={{ padding: 28 }}>
             {tab === 'journey'     && <LeadJourneyTab journeyLeads={journeyLeads} journeyLeadsLoading={journeyLeadsLoading} />}
             {tab === 'periodic'    && <PeriodicLeadsTab isManagerOrAdmin={isManagerOrAdmin} isAdmin={isAdmin} allUsers={allUsers} reps={myReps} />}
-            {tab === 'performance' && <PerformanceTab isAdmin={isAdmin} pool={perfPool} poolLabel={isAdmin ? 'Select User' : 'Select Sales Rep'} />}
+            {tab === 'performance' && <PerformanceTab isAdmin={isAdmin} pool={perfPool} poolLabel={isAdmin ? 'Select User' : 'Select RM'} />}
             {tab === 'team'        && <TeamDigestTab isAdmin={isAdmin} managers={managers} />}
           </div>
         )}

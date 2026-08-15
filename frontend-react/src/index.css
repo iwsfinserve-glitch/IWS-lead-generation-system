@@ -728,6 +728,7 @@ a:hover {
   width: 100%;
   text-align: left;
   font-family: var(--font-sans);
+  text-transform: uppercase;
   text-decoration: none;
   white-space: nowrap;
 }
