@@ -24,3 +24,11 @@ export const getInstanceStatus = (instanceName) =>
 
 export const listInstances = () =>
   api.get('/whatsapp/instances').then((r) => r.data);
+
+// ── Start Chat / History Sync ─────────────────────────────────────────
+
+export const getLeadsWithoutChats = () =>
+  api.get('/whatsapp/leads/without-chats').then((r) => r.data);
+
+export const syncChatHistory = (leadId) =>
+  api.post(`/whatsapp/chats/${leadId}/sync-history`).then((r) => r.data);

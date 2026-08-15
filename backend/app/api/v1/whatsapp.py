@@ -2,14 +2,16 @@
 WhatsApp API Routes — webhook receiver, chat management, and instance control.
 
 Mounted at /api/v1 by main.py, so routes resolve to:
-    POST /api/v1/whatsapp/webhook              (Evolution API webhook)
-    GET  /api/v1/whatsapp/chats                (List chats for current rep)
-    GET  /api/v1/whatsapp/chats/{lead_id}      (Message history for a lead)
-    POST /api/v1/whatsapp/chats/{lead_id}/send (Send message to a lead)
-    POST /api/v1/whatsapp/instances/create     (Create a WhatsApp session)
-    GET  /api/v1/whatsapp/instances/qr/{name}  (Fetch QR code for scanning)
-    GET  /api/v1/whatsapp/instances/status/{name} (Check connection status)
-    GET  /api/v1/whatsapp/instances             (List all instances)
+    POST /api/v1/whatsapp/webhook                       (Evolution API webhook)
+    GET  /api/v1/whatsapp/chats                         (List chats for current rep)
+    GET  /api/v1/whatsapp/chats/{lead_id}               (Message history for a lead)
+    POST /api/v1/whatsapp/chats/{lead_id}/send          (Send message to a lead)
+    POST /api/v1/whatsapp/chats/{lead_id}/sync-history  (Import historical messages from Evo API)
+    GET  /api/v1/whatsapp/leads/without-chats           (Leads with no WhatsApp messages yet)
+    POST /api/v1/whatsapp/instances/create              (Create a WhatsApp session)
+    GET  /api/v1/whatsapp/instances/qr/{name}           (Fetch QR code for scanning)
+    GET  /api/v1/whatsapp/instances/status/{name}       (Check connection status)
+    GET  /api/v1/whatsapp/instances                     (List all instances)
 """
 
 import logging
@@ -416,3 +418,169 @@ async def list_instances(
     except Exception as exc:
         logger.exception("Failed to list instances: %s", exc)
         raise HTTPException(status_code=502, detail="Failed to list instances")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Start Chat — leads without any WhatsApp messages
+# ═══════════════════════════════════════════════════════════════════════
+
+@router.get("/leads/without-chats")
+async def leads_without_chats(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return CRM leads that have NO WhatsApp messages yet.
+
+    Used by the 'Start Chat' modal to show a lead picker. Only returns
+    leads with a phone number so a WhatsApp session can be initiated.
+    Sales reps see only their assigned leads; managers see all.
+    """
+    # Sub-select: lead IDs that already have at least one message
+    existing_sq = (
+        select(WhatsAppMessage.lead_id)
+        .where(WhatsAppMessage.lead_id.isnot(None))
+        .distinct()
+        .subquery()
+    )
+
+    query = (
+        select(Lead)
+        .where(
+            Lead.phone_number.isnot(None),
+            Lead.phone_number != "",
+            Lead.id.not_in(select(existing_sq)),
+        )
+        .order_by(Lead.name.asc())
+    )
+
+    if current_user.is_sales_rep:
+        query = query.where(Lead.assigned_rep_id == current_user.id)
+
+    result = await db.execute(query)
+    leads = result.scalars().all()
+
+    return [
+        {
+            "id": lead.id,
+            "name": lead.name,
+            "phone_number": lead.phone_number,
+            "status": lead.status.value if lead.status else None,
+        }
+        for lead in leads
+    ]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Sync History — bulk-import past messages from Evolution API
+# ═══════════════════════════════════════════════════════════════════════
+
+@router.post("/chats/{lead_id}/sync-history")
+async def sync_chat_history(
+    lead_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch past WhatsApp messages from Evolution API and import into the CRM.
+
+    Reaches out to the Evolution API's findMessages endpoint, filters for
+    this lead's phone number, deduplicates, and saves all new messages.
+    Returns a count of newly imported messages.
+    """
+    lead = await db.get(Lead, lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if not lead.phone_number:
+        raise HTTPException(status_code=400, detail="Lead has no phone number — add one first")
+
+    if current_user.is_sales_rep and lead.assigned_rep_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    instance_name = f"rep_{current_user.id}"
+
+    # Build the WhatsApp JID for this lead's phone number
+    clean_phone = lead.phone_number.replace("+", "").replace(" ", "").replace("-", "")
+    remote_jid = f"{clean_phone}@s.whatsapp.net"
+
+    # Fetch up to 50 historical messages from Evolution API
+    try:
+        raw_messages = await evo_client.fetch_messages(instance_name, remote_jid, count=50)
+    except Exception as exc:
+        logger.exception("Failed to fetch history from Evolution API: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Could not fetch history from WhatsApp. Make sure your WhatsApp is still connected.",
+        )
+
+    imported = 0
+    for raw in raw_messages:
+        key = raw.get("key", {})
+        wa_msg_id = key.get("id")
+        from_me = key.get("fromMe", False)
+
+        # Skip group messages
+        jid = key.get("remoteJid", "")
+        if "@g.us" in jid:
+            continue
+
+        # Dedup by whatsapp_msg_id
+        if wa_msg_id:
+            existing = await db.execute(
+                select(WhatsAppMessage).where(WhatsAppMessage.whatsapp_msg_id == wa_msg_id)
+            )
+            if existing.scalar_one_or_none():
+                continue
+
+        # Extract content
+        message_obj = raw.get("message", {})
+        content = (
+            message_obj.get("conversation")
+            or message_obj.get("extendedTextMessage", {}).get("text")
+            or ""
+        )
+        media_type = None
+        if "imageMessage" in message_obj:
+            media_type = "image"
+            content = content or message_obj["imageMessage"].get("caption", "[Image]")
+        elif "videoMessage" in message_obj:
+            media_type = "video"
+            content = content or "[Video]"
+        elif "audioMessage" in message_obj:
+            media_type = "audio"
+            content = content or "[Voice Note]"
+        elif "documentMessage" in message_obj:
+            media_type = "document"
+            content = content or message_obj["documentMessage"].get("fileName", "[Document]")
+
+        # Parse timestamp
+        ts = None
+        raw_ts = raw.get("messageTimestamp")
+        if raw_ts:
+            try:
+                ts = datetime.fromtimestamp(int(raw_ts), tz=timezone.utc)
+            except (ValueError, TypeError):
+                ts = None
+
+        direction = MessageDirection.outbound if from_me else MessageDirection.inbound
+        sender = instance_name if from_me else clean_phone
+        receiver = clean_phone if from_me else instance_name
+
+        msg = WhatsAppMessage(
+            lead_id=lead_id,
+            user_id=lead.assigned_rep_id,
+            whatsapp_msg_id=wa_msg_id,
+            instance_name=instance_name,
+            sender_phone=sender,
+            receiver_phone=receiver,
+            direction=direction,
+            content=content if content else None,
+            media_type=media_type,
+            status="delivered",
+            timestamp=ts or datetime.now(timezone.utc),
+        )
+        db.add(msg)
+        imported += 1
+
+    if imported:
+        await db.commit()
+
+    return {"imported": imported, "lead_id": lead_id}

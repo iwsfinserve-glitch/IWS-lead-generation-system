@@ -2,11 +2,12 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import {
   MessageCircle, Send, Search, Phone, User, ArrowLeft,
-  Wifi, WifiOff, Settings, ChevronRight, Clock, CheckCheck
+  Wifi, WifiOff, Settings, ChevronRight, Clock, CheckCheck, Plus
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getWhatsAppChats, getChatMessages, sendWhatsAppMessage, getInstanceStatus } from '../api/whatsappApi';
 import WhatsAppConnectModal from '../components/modals/WhatsAppConnectModal';
+import StartChatModal from '../components/modals/StartChatModal';
 import Navbar from '../components/layout/Navbar';
 import toast from 'react-hot-toast';
 
@@ -31,6 +32,7 @@ export default function WhatsAppInbox() {
   const [sending, setSending] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('checking'); // checking | open | close
   const [showConnectModal, setShowConnectModal] = useState(false);
+  const [showStartChatModal, setShowStartChatModal] = useState(false);
   const [mobileShowChat, setMobileShowChat] = useState(false);
 
   const messagesEndRef = useRef(null);
@@ -160,7 +162,7 @@ export default function WhatsAppInbox() {
       <div className="wa-inbox-container">
         {/* ── Left Panel: Chat List ── */}
         <div className={`wa-chat-list ${mobileShowChat ? 'wa-hide-mobile' : ''}`}>
-          {/* Connection Status Bar */}
+          {/* Status Bar + New Chat Button */}
           <div className="wa-status-bar">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               {connectionStatus === 'open' ? (
@@ -169,14 +171,25 @@ export default function WhatsAppInbox() {
                 <><WifiOff size={14} color="var(--danger)" /><span style={{ color: 'var(--danger)', fontSize: '0.78rem' }}>Disconnected</span></>
               )}
             </div>
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => setShowConnectModal(true)}
-              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
-              id="wa-connect-btn"
-            >
-              <Settings size={12} /> {connectionStatus === 'open' ? 'Manage' : 'Connect'}
-            </button>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowStartChatModal(true)}
+                style={{ padding: '4px 8px', fontSize: '0.75rem', color: '#25D366', borderColor: 'rgba(37,211,102,0.3)' }}
+                id="wa-new-chat-btn"
+                title="Start a new chat with a lead"
+              >
+                <Plus size={12} /> New Chat
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowConnectModal(true)}
+                style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                id="wa-connect-btn"
+              >
+                <Settings size={12} /> {connectionStatus === 'open' ? 'Manage' : 'Connect'}
+              </button>
+            </div>
           </div>
 
           {/* Search */}
@@ -339,6 +352,22 @@ export default function WhatsAppInbox() {
           onConnected={() => {
             setConnectionStatus('open');
             loadChats();
+          }}
+        />
+      )}
+
+      {/* Start Chat Modal */}
+      {showStartChatModal && (
+        <StartChatModal
+          onClose={() => setShowStartChatModal(false)}
+          onChatReady={(leadId) => {
+            setShowStartChatModal(false);
+            // Refresh chat list first, then open the chat
+            loadChats().then ? loadChats() : undefined;
+            setTimeout(() => {
+              loadChats();
+              handleSelectChat(leadId);
+            }, 600);
           }}
         />
       )}

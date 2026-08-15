@@ -128,6 +128,46 @@ class EvolutionAPIClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def fetch_messages(
+        self,
+        instance_name: str,
+        remote_jid: str,
+        count: int = 50,
+    ) -> list[dict]:
+        """Fetch historical messages from Evolution API for a specific chat.
+
+        Args:
+            instance_name: The Evolution API session name.
+            remote_jid: The WhatsApp JID of the contact (e.g. '919876543210@s.whatsapp.net').
+            count: Max number of messages to fetch (default 50).
+        """
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                self._url(f"/chat/findMessages/{instance_name}"),
+                headers=self.headers,
+                json={
+                    "where": {
+                        "key": {"remoteJid": remote_jid},
+                    },
+                    "limit": count,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            # Evolution API wraps messages in {"messages": {"records": [...]}}
+            if isinstance(data, dict):
+                records = (
+                    data.get("messages", {}).get("records")
+                    or data.get("records")
+                    or data.get("messages")
+                    or []
+                )
+                if isinstance(records, list):
+                    return records
+            if isinstance(data, list):
+                return data
+            return []
+
 
 # Singleton-ish — imported as `from app.services.whatsapp import evo_client`
 evo_client = EvolutionAPIClient()
