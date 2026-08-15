@@ -10,7 +10,7 @@ import { getLeadUpdateRequests } from '../../api/leadsApi';
 
 const navItems = [
   { to: '/dashboard',    icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/leads',        icon: Target,           label: 'All Leads' },
+  { to: '/leads',        icon: Target,           label: 'Lead Database' },
   { to: '/appointments', icon: Calendar,         label: 'Appointments' },
   { to: '/tasks',        icon: CheckSquare,      label: 'Tasks' },
   { to: '/emails',       icon: Mail,             label: 'Email Leads' },

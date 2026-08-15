@@ -276,12 +276,12 @@ export default function AllLeadsPage() {
 
   return (
     <>
-      <Navbar title="All Leads" />
+      <Navbar title="Lead Database" />
       <div className="page-container">
         {/* Header */}
         <div className="page-header">
           <div>
-            <h1 style={{ marginBottom: 4 }}>Lead Directory</h1>
+            <h1 style={{ marginBottom: 4 }}>Lead Database</h1>
             <p style={{ color: 'var(--text-muted)' }}>Manage and track all your leads in one place.</p>
           </div>
           <div className="page-header-actions">
