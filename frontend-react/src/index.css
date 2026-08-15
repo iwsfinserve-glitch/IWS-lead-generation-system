@@ -16,9 +16,9 @@
   --danger-dark: #dc2626;
 
   /* Neutral - Light Theme */
-  --bg: #f8fafc;
-  --bg-card: rgba(255, 255, 255, 0.95);
-  --bg-card-solid: #ffffff;
+  --bg: #fcf9ee;
+  --bg-card: #fcf9ee;
+  --bg-card-solid: #fcf9ee;
   --bg-hover: rgba(39, 56, 120, 0.08);
   --border: rgba(0, 0, 0, 0.1);
   --border-focus: rgba(39, 56, 120, 0.5);
@@ -30,7 +30,7 @@
 
   /* Sidebar - Light Theme */
   --sidebar-width: 240px;
-  --sidebar-bg: rgba(255, 255, 255, 0.98);
+  --sidebar-bg: #fff7c9;
   --sidebar-border: rgba(0, 0, 0, 0.08);
 
   /* Typography */
