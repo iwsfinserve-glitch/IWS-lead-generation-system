@@ -164,13 +164,17 @@ async def list_chats(
     Returns a summary per lead: last message, timestamp, and unread count.
     Managers/admins see all chats; sales reps see only their assigned leads.
     """
-    # Subquery: latest message per lead
+    # Subquery: latest message per lead for THIS user's instance
+    instance_name = f"rep_{current_user.id}"
     latest_msg_sq = (
         select(
             WhatsAppMessage.lead_id,
             func.max(WhatsAppMessage.timestamp).label("last_ts"),
         )
-        .where(WhatsAppMessage.lead_id.isnot(None))
+        .where(
+            WhatsAppMessage.lead_id.isnot(None),
+            WhatsAppMessage.instance_name == instance_name,
+        )
         .group_by(WhatsAppMessage.lead_id)
         .subquery()
     )
@@ -210,6 +214,7 @@ async def list_chats(
                 WhatsAppMessage.lead_id == row.lead_id,
                 WhatsAppMessage.direction == MessageDirection.inbound,
                 WhatsAppMessage.status != "read",
+                WhatsAppMessage.instance_name == instance_name,
             )
         )
         unread_count = unread_result.scalar() or 0
@@ -246,9 +251,14 @@ async def get_chat_messages(
     if current_user.is_sales_rep and lead.assigned_rep_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
 
+    instance_name = f"rep_{current_user.id}"
+
     result = await db.execute(
         select(WhatsAppMessage)
-        .where(WhatsAppMessage.lead_id == lead_id)
+        .where(
+            WhatsAppMessage.lead_id == lead_id,
+            WhatsAppMessage.instance_name == instance_name,
+        )
         .order_by(WhatsAppMessage.timestamp.asc())
     )
     messages = result.scalars().all()
