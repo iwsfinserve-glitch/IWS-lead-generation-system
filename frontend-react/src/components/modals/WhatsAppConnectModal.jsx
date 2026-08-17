@@ -33,19 +33,32 @@ export default function WhatsAppConnectModal({ onClose, onConnected }) {
         return;
       }
 
-      const result = await createWhatsAppInstance(instanceName);
-      if (result.qr_code) {
-        setQrCode(result.qr_code);
-        setStep('qr');
-      } else {
-        const qrResult = await getInstanceQR(instanceName);
-        if (qrResult.qr_code) {
-          setQrCode(qrResult.qr_code);
-          setStep('qr');
+      let qrData = null;
+
+      if (status.status === 'not_created') {
+        // Create it first
+        const result = await createWhatsAppInstance(instanceName);
+        if (result.qr_code) {
+          qrData = result.qr_code;
         }
       }
+
+      // If it already existed or create didn't return a QR immediately, fetch the QR
+      if (!qrData) {
+        const qrResult = await getInstanceQR(instanceName);
+        if (qrResult.qr_code) {
+          qrData = qrResult.qr_code;
+        }
+      }
+
+      if (qrData) {
+        setQrCode(qrData);
+        setStep('qr');
+      } else {
+        throw new Error("Could not fetch QR code.");
+      }
     } catch (err) {
-      setErrorMsg(err.response?.data?.detail || 'Failed to initialize WhatsApp connection');
+      setErrorMsg(err.response?.data?.detail || err.message || 'Failed to initialize WhatsApp connection');
       setStep('error');
     }
   }
