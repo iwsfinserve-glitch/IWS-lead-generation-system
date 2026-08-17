@@ -40,6 +40,7 @@ from app.services.whatsapp import (
     process_incoming_message,
     save_outbound_message,
     match_lead_by_phone,
+    _normalise_phone_for_wa
 )
 
 logger = logging.getLogger(__name__)
@@ -286,11 +287,14 @@ async def send_message(
     # Convention: instance_name = "rep_{user_id}"
     instance_name = f"rep_{current_user.id}"
 
+    # Auto-handle 10-digit numbers by prepending 91
+    clean_phone = _normalise_phone_for_wa(lead.phone_number)
+
     # Send via Evolution API
     try:
         evo_resp = await evo_client.send_text_message(
             instance_name=instance_name,
-            phone=lead.phone_number,
+            phone=clean_phone,
             text=body.content,
         )
     except Exception as exc:
@@ -521,7 +525,8 @@ async def sync_chat_history(
     instance_name = f"rep_{current_user.id}"
 
     # Build the WhatsApp JID for this lead's phone number
-    clean_phone = lead.phone_number.replace("+", "").replace(" ", "").replace("-", "")
+    # Auto-handle 10-digit numbers by prepending 91
+    clean_phone = _normalise_phone_for_wa(lead.phone_number)
     remote_jid = f"{clean_phone}@s.whatsapp.net"
 
     # Fetch up to 50 historical messages from Evolution API

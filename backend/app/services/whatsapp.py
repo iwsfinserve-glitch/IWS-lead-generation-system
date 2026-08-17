@@ -179,19 +179,34 @@ evo_client = EvolutionAPIClient()
 
 def _normalise_phone(phone: str) -> str:
     """Strip +, spaces, dashes from a phone number for comparison."""
+    if not phone: return ""
     return phone.replace("+", "").replace(" ", "").replace("-", "").strip()
 
+def _normalise_phone_for_wa(phone: str) -> str:
+    """Strip chars, and if it's exactly 10 digits, prepend '91'."""
+    clean = _normalise_phone(phone)
+    if len(clean) == 10 and clean.isdigit():
+        return f"91{clean}"
+    return clean
 
 async def match_lead_by_phone(db: AsyncSession, phone: str) -> Lead | None:
     """Find a lead whose phone_number matches the given WhatsApp phone.
 
-    Tries both raw and normalised comparison.
+    Automatically handles cases where the CRM lead has a 10-digit number
+    but WhatsApp sends it with the 91 country code.
     """
-    clean = _normalise_phone(phone)
+    from sqlalchemy import or_
+    
+    clean_wa = _normalise_phone_for_wa(phone)
+    clean_lead = func.replace(func.replace(func.replace(Lead.phone_number, "+", ""), " ", ""), "-", "")
+    
     result = await db.execute(
         select(Lead).where(
-            func.replace(func.replace(func.replace(
-                Lead.phone_number, "+", ""), " ", ""), "-", "") == clean
+            or_(
+                clean_lead == clean_wa,
+                func.concat("91", clean_lead) == clean_wa,
+                clean_lead == _normalise_phone(phone)
+            )
         )
     )
     return result.scalar_one_or_none()
