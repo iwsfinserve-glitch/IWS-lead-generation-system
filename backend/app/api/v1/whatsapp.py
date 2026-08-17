@@ -398,8 +398,14 @@ async def get_instance_status(
     try:
         result = await evo_client.get_instance_status(instance_name)
     except Exception as exc:
-        logger.exception("Failed to check instance status: %s", exc)
-        raise HTTPException(status_code=502, detail="Failed to check instance status")
+        # If it's a 404 or fails, it likely means the instance doesn't exist yet.
+        # We return not_created so the frontend knows to call create_instance.
+        logger.warning("Failed to check instance status for %s (likely not created): %s", instance_name, exc)
+        return InstanceStatusResponse(
+            instance_name=instance_name,
+            status="not_created",
+            qr_code=None,
+        )
 
     conn_state = "close"
     if isinstance(result, dict):
