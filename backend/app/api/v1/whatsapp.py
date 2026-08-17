@@ -12,6 +12,7 @@ Mounted at /api/v1 by main.py, so routes resolve to:
     POST   /api/v1/whatsapp/instances/create              (Create a WhatsApp session)
     GET    /api/v1/whatsapp/instances/qr/{name}           (Fetch QR code for scanning)
     GET    /api/v1/whatsapp/instances/status/{name}       (Check connection status)
+    POST   /api/v1/whatsapp/instances/logout              (Disconnect from WhatsApp)
     GET    /api/v1/whatsapp/instances                     (List all instances)
 """
 
@@ -78,9 +79,7 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
     for msg_data in messages:
         key = msg_data.get("key", {})
 
-        # Skip status messages and our own outgoing messages
-        if key.get("fromMe", False):
-            continue
+        is_from_me = key.get("fromMe", False)
 
         remote_jid = key.get("remoteJid", "")
         # Only process individual chats (not groups)
@@ -88,11 +87,15 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
             continue
 
         # Extract phone from JID: "919876543210@s.whatsapp.net" → "919876543210"
-        sender_phone = remote_jid.split("@")[0]
+        contact_phone = remote_jid.split("@")[0]
 
-        # Determine receiver phone (the connected instance's phone)
-        # This is available in the instance info but we use instance_name as fallback
-        receiver_phone = instance_name or ""
+        # Determine sender and receiver
+        if is_from_me:
+            sender_phone = instance_name or ""
+            receiver_phone = contact_phone
+        else:
+            sender_phone = contact_phone
+            receiver_phone = instance_name or ""
 
         # Extract message content
         message_obj = msg_data.get("message", {})
@@ -138,6 +141,7 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
                 media_type=media_type,
                 media_url=media_url,
                 timestamp=ts,
+                is_from_me=is_from_me,
             )
         except Exception as exc:
             logger.exception("Failed to process WhatsApp message: %s", exc)
@@ -393,6 +397,24 @@ async def get_instance_status(
         status=conn_state,
         qr_code=None,
     )
+
+
+@router.post("/instances/logout")
+async def logout_instance(
+    current_user: User = Depends(get_current_user),
+):
+    """Log out (disconnect) the current user's WhatsApp instance.
+    
+    This severs the connection to WhatsApp. The user will need to scan
+    a new QR code to reconnect.
+    """
+    instance_name = f"rep_{current_user.id}"
+    try:
+        await evo_client.logout_instance(instance_name)
+        return {"status": "success", "message": "WhatsApp disconnected successfully"}
+    except Exception as exc:
+        logger.error("Failed to logout instance %s: %s", instance_name, exc)
+        raise HTTPException(status_code=502, detail="Failed to disconnect from WhatsApp")
 
 
 @router.get("/instances")

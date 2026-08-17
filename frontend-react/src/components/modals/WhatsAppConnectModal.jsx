@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Smartphone, Wifi, WifiOff, RefreshCw, CheckCircle2, X } from 'lucide-react';
-import { createWhatsAppInstance, getInstanceQR, getInstanceStatus } from '../../api/whatsappApi';
+import { createWhatsAppInstance, getInstanceQR, getInstanceStatus, logoutWhatsAppInstance } from '../../api/whatsappApi';
 import { useAuth } from '../../context/AuthContext';
 import toast from 'react-hot-toast';
 
@@ -21,49 +21,38 @@ export default function WhatsAppConnectModal({ onClose, onConnected }) {
   const [step, setStep] = useState('loading'); // loading | qr | connected | error
   const [qrCode, setQrCode] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
   const pollRef = useRef(null);
+
+  async function initConnection() {
+    setStep('loading');
+    try {
+      const status = await getInstanceStatus(instanceName);
+      if (status.status === 'open') {
+        setStep('connected');
+        return;
+      }
+
+      const result = await createWhatsAppInstance(instanceName);
+      if (result.qr_code) {
+        setQrCode(result.qr_code);
+        setStep('qr');
+      } else {
+        const qrResult = await getInstanceQR(instanceName);
+        if (qrResult.qr_code) {
+          setQrCode(qrResult.qr_code);
+          setStep('qr');
+        }
+      }
+    } catch (err) {
+      setErrorMsg(err.response?.data?.detail || 'Failed to initialize WhatsApp connection');
+      setStep('error');
+    }
+  }
 
   // Create instance and fetch QR on mount
   useEffect(() => {
-    let cancelled = false;
-
-    async function init() {
-      try {
-        // First check if already connected
-        try {
-          const status = await getInstanceStatus(instanceName);
-          if (status.status === 'open') {
-            setStep('connected');
-            return;
-          }
-        } catch {
-          // Instance doesn't exist yet, proceed to create
-        }
-
-        const result = await createWhatsAppInstance(instanceName);
-        if (cancelled) return;
-
-        if (result.qr_code) {
-          setQrCode(result.qr_code);
-          setStep('qr');
-        } else {
-          // No QR in create response, fetch separately
-          const qrResult = await getInstanceQR(instanceName);
-          if (!cancelled && qrResult.qr_code) {
-            setQrCode(qrResult.qr_code);
-            setStep('qr');
-          }
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setErrorMsg(err.response?.data?.detail || 'Failed to initialize WhatsApp connection');
-          setStep('error');
-        }
-      }
-    }
-
-    init();
-    return () => { cancelled = true; };
+    initConnection();
   }, [instanceName]);
 
   // Poll for connection status while QR is displayed
@@ -89,17 +78,22 @@ export default function WhatsAppConnectModal({ onClose, onConnected }) {
     };
   }, [step, instanceName, onConnected]);
 
-  const handleRefreshQR = async () => {
-    setStep('loading');
+  const handleRefreshQR = () => {
+    initConnection();
+  };
+
+  const handleDisconnect = async () => {
+    if (!window.confirm("Are you sure you want to disconnect WhatsApp from the CRM?")) return;
+    
+    setIsDisconnecting(true);
     try {
-      const qrResult = await getInstanceQR(instanceName);
-      if (qrResult.qr_code) {
-        setQrCode(qrResult.qr_code);
-        setStep('qr');
-      }
-    } catch {
-      setErrorMsg('Failed to refresh QR code');
-      setStep('error');
+      await logoutWhatsAppInstance();
+      toast.success("Disconnected successfully");
+      initConnection(); // Re-initialize to get a new QR code immediately
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to disconnect");
+    } finally {
+      setIsDisconnecting(false);
     }
   };
 
@@ -198,9 +192,19 @@ export default function WhatsAppConnectModal({ onClose, onConnected }) {
             <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: 20 }}>
               Your WhatsApp is now linked to the CRM. Messages will appear in your inbox.
             </p>
-            <button className="btn btn-primary btn-sm" onClick={onClose}>
-              Done
-            </button>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <button 
+                className="btn btn-ghost btn-sm" 
+                style={{ color: 'var(--danger)' }}
+                onClick={handleDisconnect}
+                disabled={isDisconnecting}
+              >
+                {isDisconnecting ? "Disconnecting..." : "Disconnect"}
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={onClose}>
+                Done
+              </button>
+            </div>
           </div>
         )}
 

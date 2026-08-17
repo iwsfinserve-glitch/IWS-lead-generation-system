@@ -25,6 +25,9 @@ export const getInstanceQR = (instanceName) =>
 export const getInstanceStatus = (instanceName) =>
   api.get(`/whatsapp/instances/status/${instanceName}`).then((r) => r.data);
 
+export const logoutWhatsAppInstance = () =>
+  api.post('/whatsapp/instances/logout').then((r) => r.data);
+
 export const listInstances = () =>
   api.get('/whatsapp/instances').then((r) => r.data);
 

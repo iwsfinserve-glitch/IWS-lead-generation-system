@@ -205,19 +205,20 @@ async def process_incoming_message(
     receiver_phone: str,
     content: str | None,
     whatsapp_msg_id: str | None,
-    media_type: str | None = None,
     media_url: str | None = None,
     timestamp: datetime | None = None,
+    is_from_me: bool = False,
 ) -> WhatsAppMessage:
     """Process an inbound WhatsApp message from the Evolution API webhook.
 
-    1. Match sender phone to a Lead.
+    1. Match the correct phone number (sender if inbound, receiver if outbound) to a Lead.
     2. Find the assigned sales rep.
     3. Save the WhatsAppMessage row.
     4. Log a LeadTimeline entry for AI context.
     """
     # 1. Match lead
-    lead = await match_lead_by_phone(db, sender_phone)
+    lead_phone = receiver_phone if is_from_me else sender_phone
+    lead = await match_lead_by_phone(db, lead_phone)
     lead_id = lead.id if lead else None
     user_id = lead.assigned_rep_id if lead else None
 
@@ -238,7 +239,7 @@ async def process_incoming_message(
         instance_name=instance_name,
         sender_phone=sender_phone,
         receiver_phone=receiver_phone,
-        direction=MessageDirection.inbound,
+        direction=MessageDirection.outbound if is_from_me else MessageDirection.inbound,
         content=content,
         media_type=media_type,
         media_url=media_url,
@@ -263,17 +264,18 @@ async def process_incoming_message(
         )
         db.add(timeline_entry)
 
-        # In-app notification for the sales rep
-        lead_display = lead.name or sender_phone
-        notif = Notification(
-            user_id=user_id,
-            title=f"WhatsApp from {lead_display}",
-            message=f"{preview or '[Media]'}",
-            notification_type="whatsapp_message",
-            link_type="lead",
-            link_id=lead_id,
-        )
-        db.add(notif)
+        # Only notify if it's an inbound message
+        if not is_from_me:
+            lead_display = lead.name or sender_phone
+            notif = Notification(
+                user_id=user_id,
+                title=f"WhatsApp from {lead_display}",
+                message=f"{preview or '[Media]'}",
+                notification_type="whatsapp_message",
+                link_type="lead",
+                link_id=lead_id,
+            )
+            db.add(notif)
 
     await db.commit()
     await db.refresh(msg)
