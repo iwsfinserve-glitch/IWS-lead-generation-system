@@ -2,10 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import {
   MessageCircle, Send, Search, Phone, User, ArrowLeft,
-  Wifi, WifiOff, Settings, ChevronRight, Clock, CheckCheck, Plus, Trash2
+  Wifi, WifiOff, Settings, ChevronRight, Clock, CheckCheck, Plus, Trash2, RefreshCw
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { getWhatsAppChats, getChatMessages, sendWhatsAppMessage, getInstanceStatus, deleteWhatsAppChat } from '../api/whatsappApi';
+import { getWhatsAppChats, getChatMessages, sendWhatsAppMessage, getInstanceStatus, deleteWhatsAppChat, syncChatHistory } from '../api/whatsappApi';
 import WhatsAppConnectModal from '../components/modals/WhatsAppConnectModal';
 import StartChatModal from '../components/modals/StartChatModal';
 import Navbar from '../components/layout/Navbar';
@@ -142,6 +142,25 @@ export default function WhatsAppInbox() {
       loadChats();
     } catch (err) {
       toast.error('Failed to delete chat');
+    }
+  };
+
+  // ── Sync Chat History ───────────────────────────────────────────────
+  const handleSyncChat = async () => {
+    if (!selectedLeadId) return;
+    
+    // Set a local loading state if needed, but since it's fast we'll just show toast
+    const loadingToast = toast.loading('Syncing latest messages...');
+    try {
+      const res = await syncChatHistory(selectedLeadId);
+      if (res.imported > 0) {
+        toast.success(`Synced ${res.imported} new message(s)!`, { id: loadingToast });
+        loadMessages(); // reload messages
+      } else {
+        toast.success('Chat is already up to date', { id: loadingToast });
+      }
+    } catch (err) {
+      toast.error('Failed to sync chat history', { id: loadingToast });
     }
   };
 
@@ -291,14 +310,24 @@ export default function WhatsAppInbox() {
                     )}
                   </div>
                 </div>
-                <button
-                  className="btn btn-ghost"
-                  onClick={handleDeleteChat}
-                  style={{ padding: '6px 8px', color: 'var(--danger)' }}
-                  title="Delete chat from CRM"
-                >
-                  <Trash2 size={16} />
-                </button>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={handleSyncChat}
+                    style={{ padding: '6px 8px', color: 'var(--text-primary)' }}
+                    title="Manual sync messages"
+                  >
+                    <RefreshCw size={16} />
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={handleDeleteChat}
+                    style={{ padding: '6px 8px', color: 'var(--danger)' }}
+                    title="Delete chat from CRM"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </div>
 
               {/* Messages */}

@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   MessageCircle, Send, X, Trash2,
-  ChevronRight, CheckCheck, ArrowLeft
+  ChevronRight, CheckCheck, ArrowLeft, RefreshCw
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { getWhatsAppChats, getChatMessages, sendWhatsAppMessage, deleteWhatsAppChat } from '../../api/whatsappApi';
+import { getWhatsAppChats, getChatMessages, sendWhatsAppMessage, deleteWhatsAppChat, syncChatHistory } from '../../api/whatsappApi';
 import toast from 'react-hot-toast';
 
 /**
@@ -91,6 +91,23 @@ export default function WhatsAppWidget() {
     }
   };
 
+  const handleSyncChat = async () => {
+    if (!selectedLeadId) return;
+    
+    const loadingToast = toast.loading('Syncing latest messages...');
+    try {
+      const res = await syncChatHistory(selectedLeadId);
+      if (res.imported > 0) {
+        toast.success(`Synced ${res.imported} new message(s)!`, { id: loadingToast });
+        loadMessages();
+      } else {
+        toast.success('Chat is already up to date', { id: loadingToast });
+      }
+    } catch (err) {
+      toast.error('Failed to sync chat history', { id: loadingToast });
+    }
+  };
+
   // ── Send message ──────────────────────────────────────────────────
   const handleSend = async (e) => {
     e.preventDefault();
@@ -160,12 +177,20 @@ export default function WhatsAppWidget() {
             </span>
             <div style={{ display: 'flex', gap: 4 }}>
               {view === 'chat' && (
-                <button onClick={handleDeleteChat} title="Delete chat" style={{
-                  background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.8)',
-                  display: 'flex', padding: 4,
-                }}>
-                  <Trash2 size={15} />
-                </button>
+                <>
+                  <button onClick={handleSyncChat} title="Sync messages" style={{
+                    background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.8)',
+                    display: 'flex', padding: 4,
+                  }}>
+                    <RefreshCw size={15} />
+                  </button>
+                  <button onClick={handleDeleteChat} title="Delete chat" style={{
+                    background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.8)',
+                    display: 'flex', padding: 4,
+                  }}>
+                    <Trash2 size={15} />
+                  </button>
+                </>
               )}
               <button onClick={() => setIsOpen(false)} style={{
                 background: 'none', border: 'none', cursor: 'pointer', color: '#fff',
