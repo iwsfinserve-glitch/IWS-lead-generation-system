@@ -205,6 +205,7 @@ async def process_incoming_message(
     receiver_phone: str,
     content: str | None,
     whatsapp_msg_id: str | None,
+    media_type: str | None = None,
     media_url: str | None = None,
     timestamp: datetime | None = None,
     is_from_me: bool = False,
