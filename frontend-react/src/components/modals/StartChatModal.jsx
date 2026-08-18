@@ -68,9 +68,19 @@ export default function StartChatModal({ onClose, onChatReady }) {
     }
   };
 
-  const handleStartFresh = () => {
+  const handleStartFresh = async () => {
     if (!selectedLead) return;
-    onChatReady(selectedLead.id);
+    setSyncing(true);
+    try {
+      // Calling syncChatHistory will force the backend to inject the initialisation message 
+      // if no history exists, ensuring the chat appears in the sidebar.
+      await syncChatHistory(selectedLead.id);
+      onChatReady(selectedLead.id);
+    } catch (err) {
+      toast.error('Failed to initialize chat');
+    } finally {
+      setSyncing(false);
+    }
   };
 
   const statusColor = {

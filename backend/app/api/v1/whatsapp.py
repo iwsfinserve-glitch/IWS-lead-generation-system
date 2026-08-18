@@ -624,7 +624,31 @@ async def sync_chat_history(
         db.add(msg)
         imported += 1
 
-    if imported:
+    if imported == 0:
+        # Check if any messages exist for this chat already
+        existing_chat = await db.execute(
+            select(WhatsAppMessage).where(
+                WhatsAppMessage.lead_id == lead_id,
+                WhatsAppMessage.instance_name == instance_name
+            )
+        )
+        if not existing_chat.scalars().first():
+            # Initialise with a system message so the chat appears in the sidebar
+            sys_msg = WhatsAppMessage(
+                lead_id=lead_id,
+                user_id=lead.assigned_rep_id,
+                whatsapp_msg_id=f"sys_init_{lead_id}_{int(datetime.now().timestamp())}",
+                instance_name=instance_name,
+                sender_phone=instance_name,
+                receiver_phone=clean_phone,
+                direction=MessageDirection.outbound,
+                content="[Chat Initialised - No previous history found]",
+                status="delivered",
+                timestamp=datetime.now(timezone.utc),
+            )
+            db.add(sys_msg)
+            await db.commit()
+    else:
         await db.commit()
 
     return {"imported": imported, "lead_id": lead_id}
