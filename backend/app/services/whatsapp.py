@@ -189,27 +189,33 @@ def _normalise_phone_for_wa(phone: str) -> str:
         return f"91{clean}"
     return clean
 
-async def match_lead_by_phone(db: AsyncSession, phone: str) -> Lead | None:
+async def match_lead_by_phone(db: AsyncSession, phone: str, assigned_rep_id: int | None = None) -> Lead | None:
     """Find a lead whose phone_number matches the given WhatsApp phone.
-
     Automatically handles cases where the CRM lead has a 10-digit number
     but WhatsApp sends it with the 91 country code.
     """
     from sqlalchemy import or_
     
     clean_wa = _normalise_phone_for_wa(phone)
+    if not clean_wa:
+        return None
+        
     clean_lead = func.replace(func.replace(func.replace(Lead.phone_number, "+", ""), " ", ""), "-", "")
     
-    result = await db.execute(
-        select(Lead).where(
-            or_(
-                clean_lead == clean_wa,
-                func.concat("91", clean_lead) == clean_wa,
-                clean_lead == _normalise_phone(phone)
-            )
+    query = select(Lead).where(
+        or_(
+            clean_lead == clean_wa,
+            func.concat("91", clean_lead) == clean_wa,
+            clean_lead == _normalise_phone(phone)
         )
     )
-    return result.scalar_one_or_none()
+    
+    if assigned_rep_id is not None:
+        query = query.where(Lead.assigned_rep_id == assigned_rep_id)
+        
+    result = await db.execute(query)
+    # Use first() instead of scalar_one_or_none() to prevent webhook crashes if multiple leads have same phone
+    return result.scalars().first()
 
 
 async def process_incoming_message(
@@ -232,9 +238,16 @@ async def process_incoming_message(
     3. Save the WhatsAppMessage row.
     4. Log a LeadTimeline entry for AI context.
     """
-    # 1. Match lead
+    # 1. Match lead (only match leads assigned to this WhatsApp instance's user!)
+    rep_id = None
+    if instance_name and instance_name.startswith("rep_"):
+        try:
+            rep_id = int(instance_name.replace("rep_", ""))
+        except ValueError:
+            pass
+
     lead_phone = receiver_phone if is_from_me else sender_phone
-    lead = await match_lead_by_phone(db, lead_phone)
+    lead = await match_lead_by_phone(db, lead_phone, assigned_rep_id=rep_id)
     lead_id = lead.id if lead else None
     user_id = lead.assigned_rep_id if lead else None
 
