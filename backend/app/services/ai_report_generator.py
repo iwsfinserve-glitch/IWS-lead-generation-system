@@ -460,17 +460,76 @@ def build_docx_report(
             doc.add_paragraph()
 
     # ── AI Narrative body ─────────────────────────────────────────────
-    for paragraph in body_text.strip().split("\n\n"):
-        cleaned = paragraph.strip()
-        if not cleaned:
+    import re
+
+    def _add_formatted_runs(p, text_str: str):
+        """Parse **bold** or __bold__ in text_str and add runs with run.bold=True."""
+        parts = re.split(r'(\*\*.*?\*\*|__.*?__)', text_str)
+        for part in parts:
+            if not part:
+                continue
+            if (part.startswith('**') and part.endswith('**')) or (part.startswith('__') and part.endswith('__')):
+                r = p.add_run(part[2:-2])
+                r.bold = True
+            else:
+                p.add_run(part)
+
+    paragraphs = body_text.strip().split("\n\n")
+    for block in paragraphs:
+        block = block.strip()
+        if not block:
             continue
-        if cleaned.isupper() or (len(cleaned) < 80 and cleaned.endswith(":")):
-            p = doc.add_heading(cleaned.rstrip(":"), level=2)
-            for run in p.runs:
-                run.font.color.rgb = RGBColor(0x1E, 0x40, 0xAF)
-        else:
-            p = doc.add_paragraph(cleaned)
-            p.paragraph_format.space_after = Pt(6)
+
+        lines = [l.strip() for l in block.split("\n") if l.strip()]
+        for line in lines:
+            # Skip horizontal rules
+            if line in ("---", "***", "___") or set(line) <= {"-", "*", "_"}:
+                continue
+
+            # Markdown headings: # Heading, ## Heading, ### Heading
+            heading_match = re.match(r'^(#{1,6})\s*(.*)', line)
+            if heading_match:
+                h_level = min(len(heading_match.group(1)), 3)
+                h_text = heading_match.group(2).replace('**', '').replace('__', '').strip()
+                p = doc.add_heading(h_text, level=h_level)
+                p.paragraph_format.space_before = Pt(10)
+                p.paragraph_format.space_after = Pt(4)
+                for run in p.runs:
+                    run.font.color.rgb = RGBColor(0x1E, 0x40, 0xAF)
+                continue
+
+            # Plain capitalized or colon-terminated heading without hashes
+            if (line.isupper() and len(line) < 60) or (len(line) < 80 and line.endswith(":") and not line.startswith(("*", "-", "•"))):
+                clean_heading = line.replace('**', '').replace('__', '').rstrip(":")
+                p = doc.add_heading(clean_heading, level=2)
+                p.paragraph_format.space_before = Pt(8)
+                p.paragraph_format.space_after = Pt(3)
+                for run in p.runs:
+                    run.font.color.rgb = RGBColor(0x1E, 0x40, 0xAF)
+                continue
+
+            # Bullet points: * item, - item, • item
+            bullet_match = re.match(r'^[\*\-\•]\s+(.*)', line)
+            if bullet_match:
+                p = doc.add_paragraph(style='List Bullet')
+                p.paragraph_format.space_after = Pt(3)
+                _add_formatted_runs(p, bullet_match.group(1))
+                continue
+
+            # Numbered lists: 1. item, 1) item
+            num_match = re.match(r'^(\d+[\.\)])\s+(.*)', line)
+            if num_match:
+                p = doc.add_paragraph()
+                p.paragraph_format.space_after = Pt(3)
+                r_num = p.add_run(num_match.group(1) + " ")
+                r_num.bold = True
+                _add_formatted_runs(p, num_match.group(2))
+                continue
+
+            # Regular paragraph or memo header line
+            p = doc.add_paragraph()
+            p.paragraph_format.space_after = Pt(5)
+            _add_formatted_runs(p, line)
 
     # Footer
     doc.add_paragraph()

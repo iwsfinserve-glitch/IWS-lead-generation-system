@@ -42,6 +42,7 @@ Timeline data (JSON):
 {json.dumps(timeline_data, indent=2)}
 
 Write in clear, professional financial advisory English. Use paragraphs, not bullet points.
+Formatting rules: Do NOT use raw markdown symbols, markdown hashes (###), asterisks (**), or divider dashes (---). Do not format as a raw markdown memorandum with asterisks. Write clean section headings on their own lines.
 Assume the reader is a relationship manager reviewing the account.
 """
 
@@ -79,7 +80,8 @@ Individual lead details:
 {leads_detail}
 
 Write in clear, professional English with a wealth management advisory perspective.
-Use paragraphs and clear section headings (not raw bullet points).
+Formatting rules: Do NOT use raw markdown symbols, hashes (###), asterisks (**), or divider dashes (---).
+Use paragraphs and clean section headings on their own lines.
 """
 
 
@@ -101,7 +103,8 @@ Performance metrics (JSON):
 {json.dumps(metrics, indent=2)}
 
 Write in a professional, balanced performance review tone.
-Use clear section headings and paragraphs (not raw bullet points).
+Formatting rules: Do NOT use raw markdown symbols, hashes (###), asterisks (**), or divider dashes (---).
+Use clean section headings and paragraphs on their own lines.
 Be data-driven and specific, referencing the actual numbers provided.
 """
 
@@ -123,7 +126,8 @@ Team metrics (JSON):
 {json.dumps(metrics, indent=2)}
 
 Write in clear, professional English for a senior management audience.
-Use section headings and paragraphs (not raw bullet points).
+Formatting rules: Do NOT use raw markdown symbols, hashes (###), asterisks (**), or divider dashes (---).
+Use clean section headings and paragraphs on their own lines.
 """
 
 

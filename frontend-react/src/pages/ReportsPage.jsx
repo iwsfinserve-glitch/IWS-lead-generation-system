@@ -111,10 +111,116 @@ function downloadDocx(b64, filename) {
 // ── Narrative Box ─────────────────────────────────────────────────
 function Narrative({ text }) {
   if (!text) return null;
+
+  const renderInline = (str) => {
+    const parts = str.split(/(\*\*.*?\*\*|__.*?__)/g);
+    return parts.map((part, i) => {
+      if ((part.startsWith('**') && part.endsWith('**')) || (part.startsWith('__') && part.endsWith('__'))) {
+        return (
+          <strong key={i} style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+      return part;
+    });
+  };
+
+  const lines = text.split('\n');
+  const elements = [];
+  let listBuffer = [];
+
+  const flushList = () => {
+    if (listBuffer.length > 0) {
+      elements.push(
+        <ul key={`ul-${elements.length}`} style={{ margin: '6px 0 10px 18px', paddingLeft: 6, color: 'var(--text-secondary)', fontSize: '0.88rem', lineHeight: 1.65 }}>
+          {listBuffer.map((item, idx) => (
+            <li key={idx} style={{ marginBottom: 3 }}>{renderInline(item)}</li>
+          ))}
+        </ul>
+      );
+      listBuffer = [];
+    }
+  };
+
+  lines.forEach((rawLine, idx) => {
+    const line = rawLine.trim();
+
+    if (!line) {
+      flushList();
+      return;
+    }
+
+    // Horizontal Rule
+    if (line === '---' || line === '***' || line === '___' || /^[-*_]{3,}$/.test(line)) {
+      flushList();
+      elements.push(
+        <hr key={`hr-${idx}`} style={{ border: 'none', borderTop: '1px solid rgba(5,58,187,0.12)', margin: '14px 0' }} />
+      );
+      return;
+    }
+
+    // Markdown Headings (e.g. ### Heading or ## Heading or # Heading)
+    const headingMatch = line.match(/^(#{1,6})\s*(.*)/);
+    if (headingMatch) {
+      flushList();
+      const level = headingMatch[1].length;
+      const cleanTitle = headingMatch[2].replace(/\*\*/g, '').replace(/__/g, '').trim();
+      elements.push(
+        <div
+          key={`h-${idx}`}
+          style={{
+            fontSize: level <= 2 ? '1.02rem' : '0.92rem',
+            fontWeight: 700,
+            color: 'var(--primary)',
+            marginTop: 16,
+            marginBottom: 6,
+            letterSpacing: '0.3px',
+          }}
+        >
+          {cleanTitle}
+        </div>
+      );
+      return;
+    }
+
+    // Bullet items
+    const bulletMatch = line.match(/^[\*\-\•]\s+(.*)/);
+    if (bulletMatch) {
+      listBuffer.push(bulletMatch[1]);
+      return;
+    }
+
+    // Numbered list
+    const numMatch = line.match(/^(\d+[\.\)])\s+(.*)/);
+    if (numMatch) {
+      flushList();
+      elements.push(
+        <div key={`num-${idx}`} style={{ margin: '4px 0', fontSize: '0.88rem', lineHeight: 1.65, color: 'var(--text-secondary)' }}>
+          <strong style={{ color: 'var(--primary)', marginRight: 6 }}>{numMatch[1]}</strong>
+          {renderInline(numMatch[2])}
+        </div>
+      );
+      return;
+    }
+
+    // Regular line / Memorandum line
+    flushList();
+    elements.push(
+      <p key={`p-${idx}`} style={{ fontSize: '0.88rem', lineHeight: 1.65, color: 'var(--text-secondary)', margin: '5px 0' }}>
+        {renderInline(line)}
+      </p>
+    );
+  });
+
+  flushList();
+
   return (
-    <div style={{ background: 'linear-gradient(135deg, rgba(5,58,187,0.07) 0%, rgba(14,165,233,0.05) 100%)', border: '1px solid rgba(5,58,187,0.18)', borderRadius: 10, padding: '16px 20px', marginTop: 20 }}>
-      <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', color: BRAND_BLUE, marginBottom: 8 }}>AI Analysis Narrative</div>
-      <p style={{ fontSize: '0.9rem', lineHeight: 1.7, color: 'var(--text-secondary)', whiteSpace: 'pre-line' }}>{text}</p>
+    <div style={{ background: 'linear-gradient(135deg, rgba(5,58,187,0.06) 0%, rgba(14,165,233,0.04) 100%)', border: '1px solid rgba(5,58,187,0.18)', borderRadius: 10, padding: '18px 22px', marginTop: 20 }}>
+      <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', color: BRAND_BLUE, marginBottom: 12 }}>
+        AI Analysis Narrative
+      </div>
+      <div>{elements}</div>
     </div>
   );
 }
