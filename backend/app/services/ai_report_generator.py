@@ -58,10 +58,10 @@ async def generate_lead_journey_report(timeline_data: list[dict], lead_name: str
             model_name=ai_settings.AI_REPORT_MODEL_NAME,
         )
         return result.text
-    except AIServiceError as exc:
-        logger.exception("Gemini API call failed for lead journey report")
+    except Exception as exc:
+        logger.exception("Gemini API call failed for lead journey report: %s", exc)
         raise AIReportError(
-            f"AI report generation failed for lead '{lead_name}'"
+            f"AI report generation failed for lead '{lead_name}': {exc}"
         ) from exc
 
 
@@ -80,10 +80,10 @@ async def generate_periodic_leads_report(
             model_name=ai_settings.AI_REPORT_MODEL_NAME,
         )
         return result.text
-    except AIServiceError as exc:
-        logger.exception("Gemini API call failed for periodic leads report")
+    except Exception as exc:
+        logger.exception("Gemini API call failed for periodic leads report: %s", exc)
         raise AIReportError(
-            f"AI report generation failed for periodic leads report"
+            f"AI report generation failed for periodic leads report: {exc}"
         ) from exc
 
 
@@ -108,10 +108,10 @@ async def generate_user_performance_report(
             model_name=ai_settings.AI_REPORT_MODEL_NAME,
         )
         return result.text
-    except AIServiceError as exc:
-        logger.exception("Gemini API call failed for user performance report")
+    except Exception as exc:
+        logger.exception("Gemini API call failed for user performance report: %s", exc)
         raise AIReportError(
-            f"AI report generation failed for user performance report"
+            f"AI report generation failed for user performance report: {exc}"
         ) from exc
 
 
@@ -126,10 +126,10 @@ async def generate_team_performance_report(metrics: dict) -> str:
             model_name=ai_settings.AI_REPORT_MODEL_NAME,
         )
         return result.text
-    except AIServiceError as exc:
-        logger.exception("Gemini API call failed for team performance report")
+    except Exception as exc:
+        logger.exception("Gemini API call failed for team performance report: %s", exc)
         raise AIReportError(
-            "AI report generation failed for team performance report"
+            f"AI report generation failed for team performance report: {exc}"
         ) from exc
 
 

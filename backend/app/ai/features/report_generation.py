@@ -140,7 +140,7 @@ class LeadJourneyFeature(BaseAIFeature[dict, ReportText]):
             context["timeline_data"], context["lead_name"]
         )
 
-    async def run(self, context: dict, entity_id: int | str = "") -> ReportText:  # type: ignore[override]
+    async def run(self, context: dict, entity_id: int | str = "", model_name: str | None = None) -> ReportText:  # type: ignore[override]
         prompt = self.build_prompt(context)
         return await self.client.generate(
             prompt=prompt,
@@ -148,6 +148,7 @@ class LeadJourneyFeature(BaseAIFeature[dict, ReportText]):
             feature_name=self.feature_name,
             entity_id=entity_id,
             plain_text=True,
+            model_name=model_name,
         )
 
 
@@ -164,7 +165,7 @@ class PeriodicLeadsReportFeature(BaseAIFeature[dict, ReportText]):
             context["target_name"],
         )
 
-    async def run(self, context: dict, entity_id: int | str = "") -> ReportText:  # type: ignore[override]
+    async def run(self, context: dict, entity_id: int | str = "", model_name: str | None = None) -> ReportText:  # type: ignore[override]
         prompt = self.build_prompt(context)
         return await self.client.generate(
             prompt=prompt,
@@ -172,6 +173,7 @@ class PeriodicLeadsReportFeature(BaseAIFeature[dict, ReportText]):
             feature_name=self.feature_name,
             entity_id=entity_id,
             plain_text=True,
+            model_name=model_name,
         )
 
 
@@ -189,7 +191,7 @@ class UserPerformanceReportFeature(BaseAIFeature[dict, ReportText]):
             context["user_role"],
         )
 
-    async def run(self, context: dict, entity_id: int | str = "") -> ReportText:  # type: ignore[override]
+    async def run(self, context: dict, entity_id: int | str = "", model_name: str | None = None) -> ReportText:  # type: ignore[override]
         prompt = self.build_prompt(context)
         return await self.client.generate(
             prompt=prompt,
@@ -197,6 +199,7 @@ class UserPerformanceReportFeature(BaseAIFeature[dict, ReportText]):
             feature_name=self.feature_name,
             entity_id=entity_id,
             plain_text=True,
+            model_name=model_name,
         )
 
 
@@ -209,7 +212,7 @@ class TeamPerformanceFeature(BaseAIFeature[dict, ReportText]):
     def build_prompt(self, context: dict) -> str:  # type: ignore[override]
         return _team_performance_prompt(context["metrics"])
 
-    async def run(self, context: dict, entity_id: int | str = "") -> ReportText:  # type: ignore[override]
+    async def run(self, context: dict, entity_id: int | str = "", model_name: str | None = None) -> ReportText:  # type: ignore[override]
         prompt = self.build_prompt(context)
         return await self.client.generate(
             prompt=prompt,
@@ -217,4 +220,5 @@ class TeamPerformanceFeature(BaseAIFeature[dict, ReportText]):
             feature_name=self.feature_name,
             entity_id=entity_id,
             plain_text=True,
+            model_name=model_name,
         )

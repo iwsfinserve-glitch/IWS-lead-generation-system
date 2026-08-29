@@ -326,8 +326,8 @@ async def lead_journey_report(
     lead, timeline_data = data["lead"], data["timeline_data"]
     try:
         narrative = await generate_lead_journey_report(timeline_data, lead.name)
-    except AIReportError:
-        raise HTTPException(status_code=503, detail="AI report generation is temporarily unavailable.")
+    except AIReportError as exc:
+        raise HTTPException(status_code=503, detail=f"AI report generation unavailable: {exc}")
     metrics = {
         "total_events": len(timeline_data),
         "by_event_type": {et: sum(1 for t in timeline_data if t["event_type"] == et)
@@ -361,8 +361,8 @@ async def lead_journey_report_download(
     lead, timeline_data = data["lead"], data["timeline_data"]
     try:
         narrative = await generate_lead_journey_report(timeline_data, lead.name)
-    except AIReportError:
-        raise HTTPException(status_code=503, detail="AI report generation is temporarily unavailable.")
+    except AIReportError as exc:
+        raise HTTPException(status_code=503, detail=f"AI report generation unavailable: {exc}")
     metrics = {
         "total_events": len(timeline_data),
         "by_event_type": {et: sum(1 for t in timeline_data if t["event_type"] == et)
@@ -446,8 +446,8 @@ async def periodic_leads_report(
         narrative = await generate_periodic_leads_report(
             summary, summary["period_label"], summary["target_name"]
         )
-    except AIReportError:
-        raise HTTPException(status_code=503, detail="AI report generation is temporarily unavailable.")
+    except AIReportError as exc:
+        raise HTTPException(status_code=503, detail=f"AI report generation unavailable: {exc}")
     title = f"Leads Report — {summary['target_name']} ({summary['period_label']})"
     buf = build_docx_report(title, narrative, summary, "periodic_leads")
     docx_b64 = base64.b64encode(buf.read()).decode()
@@ -474,8 +474,8 @@ async def periodic_leads_report_download(
         narrative = await generate_periodic_leads_report(
             summary, summary["period_label"], summary["target_name"]
         )
-    except AIReportError:
-        raise HTTPException(status_code=503, detail="AI report generation is temporarily unavailable.")
+    except AIReportError as exc:
+        raise HTTPException(status_code=503, detail=f"AI report generation unavailable: {exc}")
     title = f"Leads Report — {summary['target_name']} ({summary['period_label']})"
     buf = build_docx_report(title, narrative, summary, "periodic_leads")
     return StreamingResponse(
@@ -508,8 +508,8 @@ async def user_performance_report(
         narrative = await generate_user_performance_report(
             metrics, period_label, target_user.name, target_user.role.value
         )
-    except AIReportError:
-        raise HTTPException(status_code=503, detail="AI report generation is temporarily unavailable.")
+    except AIReportError as exc:
+        raise HTTPException(status_code=503, detail=f"AI report generation unavailable: {exc}")
     title = f"Performance Review — {target_user.name} ({period_label})"
     buf = build_docx_report(title, narrative, metrics, "user_performance")
     docx_b64 = base64.b64encode(buf.read()).decode()
@@ -543,8 +543,8 @@ async def user_performance_report_download(
         narrative = await generate_user_performance_report(
             metrics, period_label, target_user.name, target_user.role.value
         )
-    except AIReportError:
-        raise HTTPException(status_code=503, detail="AI report generation is temporarily unavailable.")
+    except AIReportError as exc:
+        raise HTTPException(status_code=503, detail=f"AI report generation unavailable: {exc}")
     title = f"Performance Review — {target_user.name} ({period_label})"
     buf = build_docx_report(title, narrative)
     return StreamingResponse(
@@ -639,8 +639,8 @@ async def team_performance_report(
     }
     try:
         narrative = await generate_team_performance_report(metrics_for_ai)
-    except AIReportError:
-        raise HTTPException(status_code=503, detail="AI report generation is temporarily unavailable.")
+    except AIReportError as exc:
+        raise HTTPException(status_code=503, detail=f"AI report generation unavailable: {exc}")
     title = f"Team Performance Digest — {data['team_label']} ({period_label})"
     buf = build_docx_report(title, narrative, data, "team_performance")
     docx_b64 = base64.b64encode(buf.read()).decode()
@@ -668,8 +668,8 @@ async def team_performance_report_download(
     metrics_for_ai = {"period": period_label, "team": data["team_label"], "members": data["members"], "totals": data["totals"]}
     try:
         narrative = await generate_team_performance_report(metrics_for_ai)
-    except AIReportError:
-        raise HTTPException(status_code=503, detail="AI report generation is temporarily unavailable.")
+    except AIReportError as exc:
+        raise HTTPException(status_code=503, detail=f"AI report generation unavailable: {exc}")
     buf = build_docx_report(f"Team Performance Digest — {data['team_label']} ({period_label})", narrative)
     return StreamingResponse(
         buf,
