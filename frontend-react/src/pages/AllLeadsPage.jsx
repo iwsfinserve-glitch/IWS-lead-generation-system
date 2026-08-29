@@ -223,37 +223,33 @@ export default function AllLeadsPage() {
     }
   };
 
-  const handleExportMyClients = () => {
-    const myClients = leads
-      .filter((l) => l.assigned_rep_id === user?.id)
-      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const STATUS_LABELS = {
+    unassigned: 'Unassigned',
+    in_progress: 'In Progress',
+    potential: 'Potential',
+    non_potential: 'Non-Potential',
+    converted_to_investor: 'Converted to Investor',
+    existing_investor: 'Existing Investor',
+  };
 
-    if (myClients.length === 0) {
-      toast.error('No clients to export.');
+  const exportLeadsToCSV = (leadsToExport, filename) => {
+    if (leadsToExport.length === 0) {
+      toast.error('No leads to export.');
       return;
     }
 
-    const STATUS_LABELS = {
-      unassigned: 'Unassigned',
-      in_progress: 'In Progress',
-      potential: 'Potential',
-      non_potential: 'Non-Potential',
-      converted_to_investor: 'Converted to Investor',
-      existing_investor: 'Existing Investor',
-    };
-
-    const rows = myClients.map((l) => ({
-      'Name':             l.name || '',
-      'Email':            l.email || '',
-      'Phone':            l.phone_number || '',
-      'Profession':       l.profession || '',
-      'Address':          l.address || '',
-      'Date of Birth':    l.date_of_birth || '',
-      'Age':              l.age != null ? l.age : '',
-      'Source':           l.source_name || '',
-      'Status':           STATUS_LABELS[l.status] || l.status || '',
+    const rows = leadsToExport.map((l) => ({
+      'Name':              l.name || '',
+      'Email':             l.email || '',
+      'Phone':             l.phone_number || '',
+      'Profession':        l.profession || '',
+      'Address':           l.address || '',
+      'Date of Birth':     l.date_of_birth || '',
+      'Age':               l.age != null ? l.age : '',
+      'Source':            l.source_name || '',
+      'Status':            STATUS_LABELS[l.status] || l.status || '',
       'Last Contact Date': l.last_contact_date || '',
-      'Assigned Rep':     l.assigned_rep_name || '',
+      'Assigned Rep':      l.assigned_rep_name || '',
     }));
 
     const headers = Object.keys(rows[0]);
@@ -268,10 +264,24 @@ export default function AllLeadsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `my-clients-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `${filename}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success(`Exported ${myClients.length} clients to CSV!`);
+    toast.success(`Exported ${leadsToExport.length} leads to CSV!`);
+  };
+
+  const handleExportMyClients = () => {
+    const myClients = leads
+      .filter((l) => l.assigned_rep_id === user?.id)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    exportLeadsToCSV(myClients, 'my-clients');
+  };
+
+  const handleExportUnassigned = () => {
+    const unassigned = leads
+      .filter((l) => l.status === 'unassigned')
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    exportLeadsToCSV(unassigned, 'unassigned-leads');
   };
 
   return (
@@ -287,6 +297,11 @@ export default function AllLeadsPage() {
           <div className="page-header-actions">
             {tab === 'My Clients' && (
               <button className="btn btn-ghost" onClick={handleExportMyClients} id="export-my-clients-btn">
+                <Download size={16} /> Export CSV
+              </button>
+            )}
+            {tab === 'Unassigned' && (
+              <button className="btn btn-ghost" onClick={handleExportUnassigned} id="export-unassigned-btn">
                 <Download size={16} /> Export CSV
               </button>
             )}
