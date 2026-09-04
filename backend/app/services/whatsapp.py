@@ -460,37 +460,57 @@ class EvolutionAPIClient:
 
             # 2. Parallel Query Function per instance
             async def _query_instance(inst: str) -> list[dict]:
-                # Query 1: Direct findMessages with limit
-                try:
-                    resp = await client.post(
-                        self._url(f"/chat/findMessages/{inst}"),
-                        headers=self.headers,
-                        json={"limit": count},
-                    )
-                    if resp.status_code == 200:
-                        records = self._parse_message_records(resp.json())
-                        matched = [m for m in records if _is_contact_message(m)]
-                        if matched:
-                            return matched
-                except Exception as e:
-                    logger.debug("findMessages on %s error: %s", inst, e)
+                collected = []
 
-                # Query 2: where clause fallback for standard JID
-                for jid in candidate_jids:
+                # Strategy 1: Direct number query
+                for num in candidate_numbers:
                     try:
                         resp = await client.post(
                             self._url(f"/chat/findMessages/{inst}"),
                             headers=self.headers,
-                            json={"where": {"key": {"remoteJid": jid}}, "limit": count},
+                            json={"number": num, "limit": count},
                         )
                         if resp.status_code == 200:
                             records = self._parse_message_records(resp.json())
-                            if records:
-                                return records
+                            collected.extend([m for m in records if _is_contact_message(m)])
+                    except Exception as e:
+                        logger.debug("findMessages number=%s on %s error: %s", num, inst, e)
+
+                # Strategy 2: where remoteJidAlt and remoteJid filters
+                for jid in candidate_jids:
+                    for payload in [
+                        {"where": {"key": {"remoteJidAlt": jid}}, "limit": count},
+                        {"where": {"key": {"remoteJid": jid}}, "limit": count},
+                    ]:
+                        try:
+                            resp = await client.post(
+                                self._url(f"/chat/findMessages/{inst}"),
+                                headers=self.headers,
+                                json=payload,
+                            )
+                            if resp.status_code == 200:
+                                records = self._parse_message_records(resp.json())
+                                collected.extend([m for m in records if _is_contact_message(m)])
+                        except Exception:
+                            pass
+
+                # Strategy 3: General limit fallback
+                if not collected:
+                    try:
+                        resp = await client.post(
+                            self._url(f"/chat/findMessages/{inst}"),
+                            headers=self.headers,
+                            json={"limit": count},
+                        )
+                        if resp.status_code == 200:
+                            records = self._parse_message_records(resp.json())
+                            collected.extend([m for m in records if _is_contact_message(m)])
                     except Exception:
                         pass
-                return []
 
+                return collected
+
+            candidate_numbers = list(dict.fromkeys([clean_12, digits, suffix10]))
             results = await asyncio.gather(*(_query_instance(inst) for inst in candidate_instances if inst))
             all_records = [m for sublist in results for m in sublist]
 
