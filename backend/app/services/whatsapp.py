@@ -27,6 +27,56 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Phone Extraction & JID Normalization Helpers
+# ═══════════════════════════════════════════════════════════════════════
+
+def extract_contact_phone_from_message(raw_msg: dict) -> str:
+    """Extract real phone number (international digits) from a WhatsApp/Evolution message dict.
+
+    Handles standard JIDs (@s.whatsapp.net), multi-device JIDs (:0),
+    and WhatsApp Privacy LIDs (@lid) with remoteJidAlt / participantAlt.
+    """
+    import re
+
+    if not isinstance(raw_msg, dict):
+        return ""
+
+    key = raw_msg.get("key", {}) if isinstance(raw_msg.get("key"), dict) else {}
+    candidates = [
+        key.get("remoteJidAlt"),
+        key.get("participantAlt"),
+        raw_msg.get("remoteJidAlt"),
+        raw_msg.get("participantAlt"),
+        key.get("remoteJid"),
+        raw_msg.get("remoteJid"),
+        raw_msg.get("chatId"),
+        raw_msg.get("from"),
+        raw_msg.get("to"),
+    ]
+
+    # Priority 1: Pick non-lid, non-group phone strings
+    for c in candidates:
+        if not c:
+            continue
+        c_str = str(c)
+        if "@g.us" in c_str or "@broadcast" in c_str or "@newsletter" in c_str or "@lid" in c_str:
+            continue
+        user_part = c_str.split("@")[0].split(":")[0]
+        digits = re.sub(r"\D", "", user_part)
+        if len(digits) >= 10:
+            return digits
+
+    # Priority 2: Fallback to any digits if no standard @s.whatsapp.net found
+    for c in candidates:
+        if c and "@g.us" not in str(c) and "@broadcast" not in str(c):
+            user_part = str(c).split("@")[0].split(":")[0]
+            digits = re.sub(r"\D", "", user_part)
+            if digits:
+                return digits
+    return ""
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Evolution API HTTP Client
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -66,14 +116,40 @@ class EvolutionAPIClient:
             return resp.json()
 
     async def get_instance_status(self, instance_name: str) -> dict:
-        """Check the connection status of an instance."""
+        """Check the connection status of an instance.
+        
+        If direct check returns 404/close, falls back to checking if any active
+        instance is open in Evolution API.
+        """
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(
-                self._url(f"/instance/connectionState/{instance_name}"),
-                headers=self.headers,
-            )
-            resp.raise_for_status()
-            return resp.json()
+            try:
+                resp = await client.get(
+                    self._url(f"/instance/connectionState/{instance_name}"),
+                    headers=self.headers,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    state = data.get("instance", {}).get("state") or data.get("state")
+                    if state == "open":
+                        return data
+            except Exception as e:
+                logger.debug("get_instance_status direct check failed: %s", e)
+
+            # Fallback: check all active instances
+            try:
+                list_resp = await client.get(self._url("/instance/fetchInstances"), headers=self.headers)
+                if list_resp.status_code == 200:
+                    instances = list_resp.json() if isinstance(list_resp.json(), list) else []
+                    open_inst = next((i for i in instances if i.get("connectionStatus") == "open"), None)
+                    if open_inst:
+                        return {"instance": {"instanceName": open_inst.get("name"), "state": "open"}}
+                    target = next((i for i in instances if i.get("name") == instance_name), None)
+                    if target:
+                        return {"instance": {"instanceName": instance_name, "state": target.get("connectionStatus", "close")}}
+            except Exception as e:
+                logger.debug("get_instance_status fallback check failed: %s", e)
+
+            return {"instance": {"instanceName": instance_name, "state": "close"}}
 
     async def get_qr_code(self, instance_name: str) -> dict:
         """Fetch the QR code for an instance that's waiting for scan."""
@@ -88,25 +164,46 @@ class EvolutionAPIClient:
     async def send_text_message(self, instance_name: str, phone: str, text: str) -> dict:
         """Send a text message via the connected WhatsApp instance.
 
-        Args:
-            instance_name: The Evolution API session name.
-            phone: Recipient phone in international format (e.g. '919876543210').
-            text: Message text content.
+        If target instance_name fails/404s, automatically falls back to an open instance.
         """
-        # Normalise phone: strip +, spaces, dashes
         clean_phone = phone.replace("+", "").replace(" ", "").replace("-", "")
 
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                self._url(f"/message/sendText/{instance_name}"),
-                headers=self.headers,
-                json={
-                    "number": clean_phone,
-                    "text": text,
-                },
-            )
-            resp.raise_for_status()
-            return resp.json()
+            # First try requested instance
+            try:
+                resp = await client.post(
+                    self._url(f"/message/sendText/{instance_name}"),
+                    headers=self.headers,
+                    json={
+                        "number": clean_phone,
+                        "text": text,
+                    },
+                )
+                if resp.status_code in (200, 201):
+                    return resp.json()
+            except Exception as e:
+                logger.warning("send_text_message via %s failed: %s", instance_name, e)
+
+            # Fallback to any open instance
+            try:
+                list_resp = await client.get(self._url("/instance/fetchInstances"), headers=self.headers)
+                if list_resp.status_code == 200:
+                    instances = list_resp.json() if isinstance(list_resp.json(), list) else []
+                    for inst in instances:
+                        if inst.get("connectionStatus") == "open" and inst.get("name") != instance_name:
+                            fallback_name = inst.get("name")
+                            resp = await client.post(
+                                self._url(f"/message/sendText/{fallback_name}"),
+                                headers=self.headers,
+                                json={"number": clean_phone, "text": text},
+                            )
+                            if resp.status_code in (200, 201):
+                                logger.info("send_text_message succeeded via fallback instance %s", fallback_name)
+                                return resp.json()
+            except Exception as e:
+                logger.error("send_text_message all fallbacks failed: %s", e)
+
+            raise httpx.HTTPStatusError("No connected WhatsApp instance available to send message", request=None, response=None)
 
     async def logout_instance(self, instance_name: str) -> dict:
         """Disconnect (logout) an instance without deleting it."""
@@ -167,8 +264,8 @@ class EvolutionAPIClient:
     ) -> list[dict]:
         """Fetch message history from Evolution API for a specific contact.
 
-        Supports multi-device JIDs (e.g. 919876543210:0@s.whatsapp.net),
-        querying by number, where clause, findChats discovery, and batch filtering.
+        Supports multi-instance auto-discovery, @lid Privacy JIDs (remoteJidAlt/participantAlt),
+        multi-device JIDs (:0), where queries, and batch client-side filtering.
         """
         import re
 
@@ -186,124 +283,111 @@ class EvolutionAPIClient:
             f"{suffix10}@s.whatsapp.net",
         ]))
 
-        def _extract_jid_phone(jid_str: str) -> str:
-            if not jid_str:
-                return ""
-            # Strip server and multi-device identifier (e.g. "919876543210:0@s.whatsapp.net" -> "919876543210")
-            user_part = str(jid_str).split("@")[0].split(":")[0]
-            return re.sub(r"\D", "", user_part)
-
         def _is_chat_message(m: dict) -> bool:
             """Check if a message dict strictly belongs to this lead contact."""
             if not isinstance(m, dict):
                 return False
             key = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
-            jid = str(key.get("remoteJid") or m.get("remoteJid") or m.get("chatId") or m.get("from") or m.get("to") or "")
-            # Skip groups, broadcasts, newsletters
-            if not jid or "@g.us" in jid or "@broadcast" in jid or "@newsletter" in jid:
-                return False
             
-            # Base JID match
-            jid_base = jid.split(":")[0] + ("@" + jid.split("@")[1] if "@" in jid else "")
-            if jid in candidate_jids or jid_base in candidate_jids:
-                return True
-            
-            # Digits match (handles device suffixes cleanly)
-            jid_digits = _extract_jid_phone(jid)
-            if jid_digits:
-                if jid_digits == clean_12 or jid_digits == digits:
+            # Skip group messages, broadcasts, newsletters
+            for raw_jid in [key.get("remoteJid"), m.get("remoteJid"), m.get("chatId")]:
+                if raw_jid and ("@g.us" in str(raw_jid) or "@broadcast" in str(raw_jid) or "@newsletter" in str(raw_jid)):
+                    return False
+
+            msg_phone = extract_contact_phone_from_message(m)
+            if msg_phone:
+                if msg_phone == clean_12 or msg_phone == digits:
                     return True
-                if len(suffix10) == 10 and (jid_digits.endswith(suffix10) or suffix10 in jid_digits):
+                if len(suffix10) == 10 and (msg_phone.endswith(suffix10) or suffix10 in msg_phone):
                     return True
+
+            for jid_val in [key.get("remoteJidAlt"), key.get("remoteJid"), key.get("participantAlt"), m.get("remoteJid")]:
+                if jid_val:
+                    j_str = str(jid_val)
+                    if j_str in candidate_jids:
+                        return True
+                    j_base = j_str.split(":")[0] + ("@" + j_str.split("@")[1] if "@" in j_str else "")
+                    if j_base in candidate_jids:
+                        return True
             return False
 
         async with httpx.AsyncClient(timeout=25) as client:
-            # Strategy 1: "number" field (Evolution API v2.3.7 primary)
-            for num in candidate_numbers:
-                try:
-                    resp = await client.post(
-                        self._url(f"/chat/findMessages/{instance_name}"),
-                        headers=self.headers,
-                        json={"number": num},
-                    )
-                    if resp.status_code == 200:
-                        messages = self._parse_message_response(resp.json())
-                        filtered = [m for m in messages if _is_chat_message(m)]
-                        if filtered:
-                            logger.info("fetch_messages: got %d messages via number=%s", len(filtered), num)
-                            return filtered[:count]
-                except Exception as e:
-                    logger.debug("findMessages with number=%s failed: %s", num, e)
+            # 1. Discover all candidate instances (passed instance + any open instances in Evolution API)
+            candidate_instances = [instance_name] if instance_name else []
+            try:
+                list_resp = await client.get(self._url("/instance/fetchInstances"), headers=self.headers)
+                if list_resp.status_code == 200:
+                    inst_data = list_resp.json() if isinstance(list_resp.json(), list) else []
+                    for inst in inst_data:
+                        name = inst.get("name")
+                        if name and name not in candidate_instances:
+                            if inst.get("connectionStatus") == "open":
+                                candidate_instances.insert(0 if not instance_name else 1, name)
+                            else:
+                                candidate_instances.append(name)
+            except Exception as e:
+                logger.debug("Failed to list candidate instances: %s", e)
 
-            # Strategy 2: "where" filters for remoteJid
-            for jid in candidate_jids:
-                for payload in [
-                    {"where": {"key": {"remoteJid": jid}}, "limit": count},
-                    {"where": {"remoteJid": jid}, "limit": count},
-                    {"where": {"key.remoteJid": jid}, "limit": count},
-                ]:
+            for inst in candidate_instances:
+                if not inst:
+                    continue
+
+                # Strategy 1: "number" field
+                for num in candidate_numbers:
                     try:
                         resp = await client.post(
-                            self._url(f"/chat/findMessages/{instance_name}"),
+                            self._url(f"/chat/findMessages/{inst}"),
                             headers=self.headers,
-                            json=payload,
+                            json={"number": num},
                         )
                         if resp.status_code == 200:
                             messages = self._parse_message_response(resp.json())
                             filtered = [m for m in messages if _is_chat_message(m)]
                             if filtered:
-                                logger.info("fetch_messages: got %d messages via where payload (%s)", len(filtered), jid)
+                                logger.info("fetch_messages: got %d messages via number=%s on instance=%s", len(filtered), num, inst)
                                 return filtered[:count]
                     except Exception as e:
-                        logger.debug("findMessages payload %s failed: %s", payload, e)
+                        logger.debug("findMessages with number=%s on %s failed: %s", num, inst, e)
 
-            # Strategy 3: Search findChats to get exact Evolution JID, then query findMessages
-            try:
-                for method, path in [("post", f"/chat/findChats/{instance_name}"), ("get", f"/chat/findChats/{instance_name}")]:
-                    try:
-                        if method == "post":
-                            c_resp = await client.post(self._url(path), headers=self.headers, json={})
-                        else:
-                            c_resp = await client.get(self._url(path), headers=self.headers)
-                        if c_resp.status_code == 200:
-                            chats_data = self._parse_message_response(c_resp.json())
-                            for ch in chats_data:
-                                ch_jid = str(ch.get("remoteJid") or ch.get("id") or ch.get("jid") or "")
-                                ch_phone = _extract_jid_phone(ch_jid)
-                                if (suffix10 and suffix10 in ch_phone) or ch_jid in candidate_jids or _is_chat_message(ch):
-                                    for p in [
-                                        {"where": {"remoteJid": ch_jid}, "limit": count},
-                                        {"where": {"key": {"remoteJid": ch_jid}}, "limit": count},
-                                        {"number": ch_phone or ch_jid},
-                                    ]:
-                                        m_resp = await client.post(self._url(f"/chat/findMessages/{instance_name}"), headers=self.headers, json=p)
-                                        if m_resp.status_code == 200:
-                                            msgs = self._parse_message_response(m_resp.json())
-                                            filtered = [m for m in msgs if _is_chat_message(m)]
-                                            if filtered:
-                                                logger.info("fetch_messages: got %d messages via findChats discovery for %s", len(filtered), ch_jid)
-                                                return filtered[:count]
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.debug("findChats discovery strategy failed: %s", e)
+                # Strategy 2: "where" filters for remoteJid / remoteJidAlt
+                for jid in candidate_jids:
+                    for payload in [
+                        {"where": {"key": {"remoteJidAlt": jid}}, "limit": count},
+                        {"where": {"key": {"remoteJid": jid}}, "limit": count},
+                        {"where": {"remoteJid": jid}, "limit": count},
+                        {"where": {"key.remoteJid": jid}, "limit": count},
+                    ]:
+                        try:
+                            resp = await client.post(
+                                self._url(f"/chat/findMessages/{inst}"),
+                                headers=self.headers,
+                                json=payload,
+                            )
+                            if resp.status_code == 200:
+                                messages = self._parse_message_response(resp.json())
+                                filtered = [m for m in messages if _is_chat_message(m)]
+                                if filtered:
+                                    logger.info("fetch_messages: got %d messages via where payload on %s (%s)", len(filtered), inst, jid)
+                                    return filtered[:count]
+                        except Exception as e:
+                            logger.debug("findMessages payload %s on %s failed: %s", payload, inst, e)
 
-            # Strategy 4: Batch fetch and client-side filter
-            try:
-                for fallback_payload in [{"limit": 100}, {}]:
-                    resp = await client.post(
-                        self._url(f"/chat/findMessages/{instance_name}"),
-                        headers=self.headers,
-                        json=fallback_payload,
-                    )
-                    if resp.status_code == 200:
-                        msgs = self._parse_message_response(resp.json())
-                        filtered = [m for m in msgs if _is_chat_message(m)]
-                        if filtered:
-                            logger.info("fetch_messages: got %d messages via batch fallback", len(filtered))
-                            return filtered[:count]
-            except Exception as e:
-                logger.debug("findMessages batch fallback failed: %s", e)
+                # Strategy 3: Batch fetch and client-side filter
+                try:
+                    for fallback_payload in [{"limit": 100}, {"limit": 50}, {}]:
+                        resp = await client.post(
+                            self._url(f"/chat/findMessages/{inst}"),
+                            headers=self.headers,
+                            json=fallback_payload,
+                        )
+                        if resp.status_code == 200:
+                            msgs = self._parse_message_response(resp.json())
+                            filtered = [m for m in msgs if _is_chat_message(m)]
+                            if filtered:
+                                logger.info("fetch_messages: got %d messages via batch fallback on instance %s", len(filtered), inst)
+                                return filtered[:count]
+                except Exception as e:
+                    logger.debug("findMessages batch fallback on %s failed: %s", inst, e)
 
         logger.info("fetch_messages: no messages found on Evolution API for %s", digits)
         return []
@@ -560,6 +644,8 @@ async def process_incoming_message(
 
     lead_phone = receiver_phone if is_from_me else sender_phone
     lead = await match_lead_by_phone(db, lead_phone, assigned_rep_id=rep_id)
+    if not lead and rep_id is not None:
+        lead = await match_lead_by_phone(db, lead_phone)
     if not lead:
         logger.debug("WhatsApp message from/to %s is not a CRM lead. Ignored.", lead_phone)
         return None

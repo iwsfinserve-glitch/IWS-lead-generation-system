@@ -41,6 +41,7 @@ from app.services.whatsapp import (
     save_outbound_message,
     upsert_message,
     match_lead_by_phone,
+    extract_contact_phone_from_message,
     _normalise_phone_for_wa,
     _extract_digits,
     extract_content_and_media,
@@ -92,12 +93,16 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
         is_from_me = bool(key.get("fromMe", False))
 
         remote_jid = str(key.get("remoteJid") or msg_data.get("remoteJid") or "")
-        # Only process individual chats (not groups)
-        if not remote_jid or "@g.us" in remote_jid:
+        # Only process individual chats (not groups, broadcasts, newsletters)
+        if not remote_jid or "@g.us" in remote_jid or "@broadcast" in remote_jid or "@newsletter" in remote_jid:
             continue
 
-        # Extract phone from JID: "919876543210@s.whatsapp.net" → "919876543210"
-        contact_phone = remote_jid.split("@")[0].split(":")[0]
+        # Extract real contact phone (supports @lid, remoteJidAlt, participantAlt)
+        contact_phone = extract_contact_phone_from_message(msg_data)
+        if not contact_phone:
+            contact_phone = remote_jid.split("@")[0].split(":")[0]
+            if not contact_phone:
+                continue
 
         # Determine sender and receiver
         if is_from_me:
