@@ -166,7 +166,12 @@ def extract_content_and_media(message_obj: Any, raw: Optional[dict] = None) -> T
             text = (obj.get(text_field) if text_field else None) or obj.get("caption") or default_text
             return str(text).strip(), media_type
 
-    # 4. Buttons / Template / Interactive messages
+    # 4. Reaction messages
+    if "reactionMessage" in message_obj and isinstance(message_obj["reactionMessage"], dict):
+        emoji = message_obj["reactionMessage"].get("text", "")
+        return (f"Reacted {emoji}" if emoji else ""), "reaction"
+
+    # 5. Buttons / Template / Interactive messages
     if "templateButtonReplyMessage" in message_obj:
         return str(message_obj["templateButtonReplyMessage"].get("selectedDisplayText", "[Button Reply]")).strip(), None
     if "buttonsResponseMessage" in message_obj:
@@ -174,7 +179,7 @@ def extract_content_and_media(message_obj: Any, raw: Optional[dict] = None) -> T
     if "listResponseMessage" in message_obj:
         return str(message_obj["listResponseMessage"].get("title", "[List Selection]")).strip(), None
 
-    # 5. Top-level raw fallback
+    # 6. Top-level raw fallback
     for field in ["body", "text", "caption"]:
         val = raw.get(field)
         if val and isinstance(val, str) and val.strip():
