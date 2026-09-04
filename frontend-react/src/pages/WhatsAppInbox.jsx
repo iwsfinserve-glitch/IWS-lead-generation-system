@@ -210,9 +210,9 @@ export default function WhatsAppInbox() {
         if (res.imported > 0) {
           toast.success(`Synced ${res.imported} new message${res.imported !== 1 ? 's' : ''}!`, { id: loadingToast });
         } else if (res.total > 0) {
-          toast.success(`Chat is up to date (${res.total} messages)`, { id: loadingToast });
+          toast.success(`Chat is up to date (${res.total} messages in CRM)`, { id: loadingToast });
         } else {
-          toast(`No message history found on WhatsApp`, { id: loadingToast, icon: 'ℹ️' });
+          toast(`No WhatsApp history found for ${selectedChat?.lead_phone || 'this contact'} on connected WhatsApp accounts`, { id: loadingToast, icon: 'ℹ️' });
         }
       } else if (loadingToast) {
         toast.dismiss(loadingToast);
@@ -433,9 +433,14 @@ export default function WhatsAppInbox() {
               {/* Messages */}
               <div className="wa-messages-area">
                 {messages.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-                    <MessageCircle size={40} style={{ opacity: 0.2, marginBottom: 8 }} />
-                    <p style={{ fontSize: '0.85rem' }}>No messages yet. Start a conversation!</p>
+                  <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-muted)' }}>
+                    <MessageCircle size={44} style={{ opacity: 0.25, marginBottom: 12 }} />
+                    <p style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+                      No messages yet with {selectedChat.lead_name}
+                    </p>
+                    <p style={{ fontSize: '0.82rem', maxWidth: 380, margin: '8px auto 0', lineHeight: 1.4 }}>
+                      Send a message below or click the <b>Sync</b> button above to pull previous messages if this contact has chatted with your connected WhatsApp account.
+                    </p>
                   </div>
                 ) : (
                   messages.map((msg) => (
