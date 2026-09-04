@@ -60,11 +60,11 @@ export default function StartChatModal({ onClose, onChatReady }) {
       } else {
         toast(`Starting chat with ${selectedLead.name}`, { icon: '💬' });
       }
-      onChatReady(selectedLead.id);
+      onChatReady(selectedLead.id, selectedLead);
     } catch (err) {
       // Even if sync fails, still open the chat — messages will come via webhook
       toast.error(err.response?.data?.detail || 'Could not fetch history, but chat is ready');
-      onChatReady(selectedLead.id);
+      onChatReady(selectedLead.id, selectedLead);
     } finally {
       setSyncing(false);
     }

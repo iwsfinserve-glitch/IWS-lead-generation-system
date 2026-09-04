@@ -408,16 +408,13 @@ async def upsert_message(
         existing = existing_res.scalar_one_or_none()
         if existing:
             # If it exists but wasn't linked to a lead, link it now
-            changed = False
             if existing.lead_id is None and lead_id:
                 existing.lead_id = lead_id
                 existing.user_id = user_id
                 existing.instance_name = instance_name
-                changed = True
             if not existing.content and content:
                 existing.content = content
-                changed = True
-            return existing, changed
+            return existing, False
 
     msg = WhatsAppMessage(
         lead_id=lead_id,

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getWhatsAppChats, getChatMessages, sendWhatsAppMessage, getInstanceStatus, deleteWhatsAppChat, syncChatHistory } from '../api/whatsappApi';
+import { getLead } from '../api/leadsApi';
 import WhatsAppConnectModal from '../components/modals/WhatsAppConnectModal';
 import StartChatModal from '../components/modals/StartChatModal';
 import Navbar from '../components/layout/Navbar';
@@ -25,6 +26,7 @@ export default function WhatsAppInbox() {
   // ── State ──────────────────────────────────────────────────────────
   const [chats, setChats] = useState([]);
   const [selectedLeadId, setSelectedLeadId] = useState(null);
+  const [activeLead, setActiveLead] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -38,6 +40,7 @@ export default function WhatsAppInbox() {
   const messagesEndRef = useRef(null);
   const chatPollRef = useRef(null);
   const msgPollRef = useRef(null);
+  const autoSyncedLeadRef = useRef(null);
 
   // ── Load chats ─────────────────────────────────────────────────────
   const loadChats = useCallback(async () => {
@@ -138,10 +141,38 @@ export default function WhatsAppInbox() {
   };
 
   // ── Select a chat ─────────────────────────────────────────────────
-  const handleSelectChat = (leadId) => {
+  const handleSelectChat = (leadId, leadData = null) => {
     setSelectedLeadId(leadId);
     setMobileShowChat(true);
+    if (leadData) {
+      setActiveLead({
+        lead_id: leadData.id || leadId,
+        lead_name: leadData.name,
+        lead_phone: leadData.phone_number,
+        lead_status: leadData.status,
+      });
+    }
   };
+
+  // If a lead is selected that isn't in `chats` yet (e.g., 0 messages), fetch lead details
+  useEffect(() => {
+    if (selectedLeadId && !chats.some((c) => c.lead_id === selectedLeadId)) {
+      if (!activeLead || activeLead.lead_id !== selectedLeadId) {
+        getLead(selectedLeadId)
+          .then((l) => {
+            if (l) {
+              setActiveLead({
+                lead_id: l.id,
+                lead_name: l.name,
+                lead_phone: l.phone_number,
+                lead_status: l.status,
+              });
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [selectedLeadId, chats, activeLead]);
 
   const handleBackToList = () => {
     setMobileShowChat(false);
@@ -156,6 +187,7 @@ export default function WhatsAppInbox() {
       await deleteWhatsAppChat(selectedLeadId);
       toast.success('Chat deleted');
       setSelectedLeadId(null);
+      setActiveLead(null);
       setMobileShowChat(false);
       loadChats();
     } catch (err) {
@@ -195,12 +227,19 @@ export default function WhatsAppInbox() {
     }
   };
 
-  // ── Auto-sync when opening a chat with 0 messages ──────────────────
+  // ── Auto-sync when opening a chat with 0 messages (guarded to run once per lead) ──
   useEffect(() => {
-    if (selectedLeadId && messages.length === 0 && !syncing && connectionStatus === 'open') {
+    if (
+      selectedLeadId &&
+      messages.length === 0 &&
+      !syncing &&
+      connectionStatus === 'open' &&
+      autoSyncedLeadRef.current !== selectedLeadId
+    ) {
+      autoSyncedLeadRef.current = selectedLeadId;
       handleSyncChat(true); // silent sync
     }
-  }, [selectedLeadId, messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedLeadId, messages.length, connectionStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Filter chats by search ────────────────────────────────────────
   const filteredChats = chats.filter((c) =>
@@ -208,7 +247,7 @@ export default function WhatsAppInbox() {
     c.lead_phone.includes(searchQuery)
   );
 
-  const selectedChat = chats.find((c) => c.lead_id === selectedLeadId);
+  const selectedChat = chats.find((c) => c.lead_id === selectedLeadId) || (activeLead?.lead_id === selectedLeadId ? activeLead : null);
 
   // ── Format timestamp ──────────────────────────────────────────────
   const formatTime = (ts) => {
@@ -451,14 +490,10 @@ export default function WhatsAppInbox() {
       {showStartChatModal && (
         <StartChatModal
           onClose={() => setShowStartChatModal(false)}
-          onChatReady={(leadId) => {
+          onChatReady={async (leadId, leadData) => {
             setShowStartChatModal(false);
-            // Refresh chat list first, then open the chat
-            loadChats().then ? loadChats() : undefined;
-            setTimeout(() => {
-              loadChats();
-              handleSelectChat(leadId);
-            }, 600);
+            await loadChats();
+            handleSelectChat(leadId, leadData);
           }}
         />
       )}
