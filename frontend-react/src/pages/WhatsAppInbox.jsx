@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import {
   MessageCircle, Send, Search, Phone, User, ArrowLeft,
@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getWhatsAppChats, getChatMessages, sendWhatsAppMessage, getInstanceStatus, deleteWhatsAppChat, syncChatHistory } from '../api/whatsappApi';
-import { getLead } from '../api/leadsApi';
 import WhatsAppConnectModal from '../components/modals/WhatsAppConnectModal';
 import StartChatModal from '../components/modals/StartChatModal';
 import Navbar from '../components/layout/Navbar';
@@ -26,7 +25,6 @@ export default function WhatsAppInbox() {
   // ── State ──────────────────────────────────────────────────────────
   const [chats, setChats] = useState([]);
   const [selectedLeadId, setSelectedLeadId] = useState(null);
-  const [activeLead, setActiveLead] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -40,7 +38,6 @@ export default function WhatsAppInbox() {
   const messagesEndRef = useRef(null);
   const chatPollRef = useRef(null);
   const msgPollRef = useRef(null);
-  const autoSyncedLeadRef = useRef(null);
 
   // ── Load chats ─────────────────────────────────────────────────────
   const loadChats = useCallback(async () => {
@@ -90,8 +87,8 @@ export default function WhatsAppInbox() {
   useEffect(() => {
     if (selectedLeadId) {
       loadMessages();
-      // Poll for new messages every 3s when a chat is open
-      msgPollRef.current = setInterval(loadMessages, 3000);
+      // Poll for new messages every 5s when a chat is open
+      msgPollRef.current = setInterval(loadMessages, 5000);
     }
     return () => {
       if (msgPollRef.current) clearInterval(msgPollRef.current);
@@ -108,32 +105,14 @@ export default function WhatsAppInbox() {
     e.preventDefault();
     if (!newMessage.trim() || !selectedLeadId || sending) return;
 
-    const messageText = newMessage.trim();
     setSending(true);
-
-    // Optimistic UI: show message instantly before API confirms
-    const optimisticMsg = {
-      id: `optimistic_${Date.now()}`,
-      direction: 'outbound',
-      content: messageText,
-      timestamp: new Date().toISOString(),
-      status: 'sending',
-    };
-    setMessages((prev) => [...prev, optimisticMsg]);
-    setNewMessage('');
-
     try {
-      const sentMsg = await sendWhatsAppMessage(selectedLeadId, messageText);
-      // Replace optimistic message with real one
-      setMessages((prev) =>
-        prev.map((m) => (m.id === optimisticMsg.id ? sentMsg : m))
-      );
+      const sentMsg = await sendWhatsAppMessage(selectedLeadId, newMessage.trim());
+      setMessages((prev) => [...prev, sentMsg]);
+      setNewMessage('');
       // Refresh chat list to update last message preview
       loadChats();
     } catch (err) {
-      // Remove optimistic message on failure
-      setMessages((prev) => prev.filter((m) => m.id !== optimisticMsg.id));
-      setNewMessage(messageText); // Restore the message text
       toast.error(err.response?.data?.detail || 'Failed to send message');
     } finally {
       setSending(false);
@@ -141,38 +120,10 @@ export default function WhatsAppInbox() {
   };
 
   // ── Select a chat ─────────────────────────────────────────────────
-  const handleSelectChat = (leadId, leadData = null) => {
+  const handleSelectChat = (leadId) => {
     setSelectedLeadId(leadId);
     setMobileShowChat(true);
-    if (leadData) {
-      setActiveLead({
-        lead_id: leadData.id || leadId,
-        lead_name: leadData.name,
-        lead_phone: leadData.phone_number,
-        lead_status: leadData.status,
-      });
-    }
   };
-
-  // If a lead is selected that isn't in `chats` yet (e.g., 0 messages), fetch lead details
-  useEffect(() => {
-    if (selectedLeadId && !chats.some((c) => c.lead_id === selectedLeadId)) {
-      if (!activeLead || activeLead.lead_id !== selectedLeadId) {
-        getLead(selectedLeadId)
-          .then((l) => {
-            if (l) {
-              setActiveLead({
-                lead_id: l.id,
-                lead_name: l.name,
-                lead_phone: l.phone_number,
-                lead_status: l.status,
-              });
-            }
-          })
-          .catch(() => {});
-      }
-    }
-  }, [selectedLeadId, chats, activeLead]);
 
   const handleBackToList = () => {
     setMobileShowChat(false);
@@ -187,7 +138,6 @@ export default function WhatsAppInbox() {
       await deleteWhatsAppChat(selectedLeadId);
       toast.success('Chat deleted');
       setSelectedLeadId(null);
-      setActiveLead(null);
       setMobileShowChat(false);
       loadChats();
     } catch (err) {
@@ -196,79 +146,31 @@ export default function WhatsAppInbox() {
   };
 
   // ── Sync Chat History ───────────────────────────────────────────────
-  const [syncing, setSyncing] = useState(false);
-
-  const handleSyncChat = async (silent = false) => {
-    const isSilent = typeof silent === 'boolean' ? silent : false;
-    if (!selectedLeadId || syncing) return;
+  const handleSyncChat = async () => {
+    if (!selectedLeadId) return;
     
-    setSyncing(true);
-    const loadingToast = isSilent ? null : toast.loading('Syncing messages from WhatsApp...');
+    // Set a local loading state if needed, but since it's fast we'll just show toast
+    const loadingToast = toast.loading('Syncing latest messages...');
     try {
       const res = await syncChatHistory(selectedLeadId);
-      if (!isSilent) {
-        if (res.imported > 0) {
-          toast.success(`Synced ${res.imported} new message${res.imported !== 1 ? 's' : ''}!`, { id: loadingToast });
-        } else if (res.total > 0) {
-          toast.success(`Chat is up to date (${res.total} messages in CRM)`, { id: loadingToast });
-        } else {
-          toast(`No WhatsApp history found for ${selectedChat?.lead_phone || 'this contact'} on connected WhatsApp accounts`, { id: loadingToast, icon: 'ℹ️' });
-        }
-      } else if (loadingToast) {
-        toast.dismiss(loadingToast);
+      if (res.imported > 0) {
+        toast.success(`Synced ${res.imported} new message(s)!`, { id: loadingToast });
+        loadMessages(); // reload messages
+      } else {
+        toast.success('Chat is already up to date', { id: loadingToast });
       }
-      await loadMessages();
-      await loadChats();
     } catch (err) {
-      if (!isSilent) {
-        toast.error(err.response?.data?.detail || 'Failed to sync chat history', { id: loadingToast });
-      }
-    } finally {
-      setSyncing(false);
+      toast.error('Failed to sync chat history', { id: loadingToast });
     }
   };
 
-  // ── Auto-sync when opening a chat with 0 messages (guarded to run once per lead) ──
-  useEffect(() => {
-    if (
-      selectedLeadId &&
-      messages.length === 0 &&
-      !syncing &&
-      connectionStatus === 'open' &&
-      autoSyncedLeadRef.current !== selectedLeadId
-    ) {
-      autoSyncedLeadRef.current = selectedLeadId;
-      handleSyncChat(true); // silent sync
-    }
-  }, [selectedLeadId, messages.length, connectionStatus]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Displayed chats (includes active newly added chat even before first message) ──
-  const displayedChats = useMemo(() => {
-    if (activeLead && !chats.some((c) => c.lead_id === activeLead.lead_id)) {
-      return [
-        {
-          lead_id: activeLead.lead_id,
-          lead_name: activeLead.lead_name,
-          lead_phone: activeLead.lead_phone,
-          lead_status: activeLead.lead_status,
-          last_message: 'No messages yet',
-          last_message_time: new Date().toISOString(),
-          unread_count: 0,
-          direction: null,
-        },
-        ...chats,
-      ];
-    }
-    return chats;
-  }, [chats, activeLead]);
-
   // ── Filter chats by search ────────────────────────────────────────
-  const filteredChats = displayedChats.filter((c) =>
-    (c.lead_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (c.lead_phone || '').includes(searchQuery)
+  const filteredChats = chats.filter((c) =>
+    c.lead_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    c.lead_phone.includes(searchQuery)
   );
 
-  const selectedChat = displayedChats.find((c) => c.lead_id === selectedLeadId) || (activeLead?.lead_id === selectedLeadId ? activeLead : null);
+  const selectedChat = chats.find((c) => c.lead_id === selectedLeadId);
 
   // ── Format timestamp ──────────────────────────────────────────────
   const formatTime = (ts) => {
@@ -411,13 +313,11 @@ export default function WhatsAppInbox() {
                 <div style={{ display: 'flex', gap: 4 }}>
                   <button
                     className="btn btn-ghost"
-                    onClick={() => handleSyncChat(false)}
-                    disabled={syncing}
+                    onClick={handleSyncChat}
                     style={{ padding: '6px 8px', color: 'var(--text-primary)' }}
                     title="Manual sync messages"
-                    id="wa-sync-chat-btn"
                   >
-                    <RefreshCw size={16} style={{ animation: syncing ? 'spin 1s linear infinite' : 'none' }} />
+                    <RefreshCw size={16} />
                   </button>
                   <button
                     className="btn btn-ghost"
@@ -433,14 +333,9 @@ export default function WhatsAppInbox() {
               {/* Messages */}
               <div className="wa-messages-area">
                 {messages.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-muted)' }}>
-                    <MessageCircle size={44} style={{ opacity: 0.25, marginBottom: 12 }} />
-                    <p style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
-                      No messages yet with {selectedChat.lead_name}
-                    </p>
-                    <p style={{ fontSize: '0.82rem', maxWidth: 380, margin: '8px auto 0', lineHeight: 1.4 }}>
-                      Send a message below or click the <b>Sync</b> button above to pull previous messages if this contact has chatted with your connected WhatsApp account.
-                    </p>
+                  <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                    <MessageCircle size={40} style={{ opacity: 0.2, marginBottom: 8 }} />
+                    <p style={{ fontSize: '0.85rem' }}>No messages yet. Start a conversation!</p>
                   </div>
                 ) : (
                   messages.map((msg) => (
@@ -518,10 +413,14 @@ export default function WhatsAppInbox() {
       {showStartChatModal && (
         <StartChatModal
           onClose={() => setShowStartChatModal(false)}
-          onChatReady={async (leadId, leadData) => {
+          onChatReady={(leadId) => {
             setShowStartChatModal(false);
-            await loadChats();
-            handleSelectChat(leadId, leadData);
+            // Refresh chat list first, then open the chat
+            loadChats().then ? loadChats() : undefined;
+            setTimeout(() => {
+              loadChats();
+              handleSelectChat(leadId);
+            }, 600);
           }}
         />
       )}
