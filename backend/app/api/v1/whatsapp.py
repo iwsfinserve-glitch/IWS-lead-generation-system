@@ -72,14 +72,19 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
     event = payload.get("event")
     instance_name = payload.get("instance")
 
-    # We only care about new messages
-    if event != "messages.upsert":
+    # We care about new messages, updates, and initial message history sets
+    if event not in ("messages.upsert", "messages.set", "messages.update"):
         return {"status": "ignored", "event": event}
 
     data = payload.get("data", {})
 
-    # Evolution API v2 wraps messages in a list or directly
-    messages = data if isinstance(data, list) else [data]
+    # Evolution API v2 wraps messages in a list, dict, or data.messages
+    if isinstance(data, dict) and "messages" in data and isinstance(data["messages"], list):
+        messages = data["messages"]
+    elif isinstance(data, list):
+        messages = data
+    else:
+        messages = [data]
 
     for msg_data in messages:
         key = msg_data.get("key", {}) if isinstance(msg_data.get("key"), dict) else {}

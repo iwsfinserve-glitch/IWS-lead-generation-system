@@ -199,19 +199,20 @@ export default function WhatsAppInbox() {
   const [syncing, setSyncing] = useState(false);
 
   const handleSyncChat = async (silent = false) => {
+    const isSilent = typeof silent === 'boolean' ? silent : false;
     if (!selectedLeadId || syncing) return;
     
     setSyncing(true);
-    const loadingToast = silent ? null : toast.loading('Syncing messages...');
+    const loadingToast = isSilent ? null : toast.loading('Syncing messages from WhatsApp...');
     try {
       const res = await syncChatHistory(selectedLeadId);
-      if (!silent) {
+      if (!isSilent) {
         if (res.imported > 0) {
-          toast.success(`Synced ${res.imported} message(s)!`, { id: loadingToast });
+          toast.success(`Synced ${res.imported} new message${res.imported !== 1 ? 's' : ''}!`, { id: loadingToast });
         } else if (res.total > 0) {
           toast.success(`Chat is up to date (${res.total} messages)`, { id: loadingToast });
         } else {
-          toast.success('No message history found on WhatsApp', { id: loadingToast });
+          toast(`No message history found on WhatsApp`, { id: loadingToast, icon: 'ℹ️' });
         }
       } else if (loadingToast) {
         toast.dismiss(loadingToast);
@@ -219,7 +220,7 @@ export default function WhatsAppInbox() {
       await loadMessages();
       await loadChats();
     } catch (err) {
-      if (!silent) {
+      if (!isSilent) {
         toast.error(err.response?.data?.detail || 'Failed to sync chat history', { id: loadingToast });
       }
     } finally {
@@ -410,11 +411,13 @@ export default function WhatsAppInbox() {
                 <div style={{ display: 'flex', gap: 4 }}>
                   <button
                     className="btn btn-ghost"
-                    onClick={handleSyncChat}
+                    onClick={() => handleSyncChat(false)}
+                    disabled={syncing}
                     style={{ padding: '6px 8px', color: 'var(--text-primary)' }}
                     title="Manual sync messages"
+                    id="wa-sync-chat-btn"
                   >
-                    <RefreshCw size={16} />
+                    <RefreshCw size={16} style={{ animation: syncing ? 'spin 1s linear infinite' : 'none' }} />
                   </button>
                   <button
                     className="btn btn-ghost"
