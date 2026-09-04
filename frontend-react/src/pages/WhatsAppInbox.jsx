@@ -149,18 +149,20 @@ export default function WhatsAppInbox() {
   const handleSyncChat = async () => {
     if (!selectedLeadId) return;
     
-    // Set a local loading state if needed, but since it's fast we'll just show toast
-    const loadingToast = toast.loading('Syncing latest messages...');
+    const loadingToast = toast.loading('Fetching last 50 messages...');
     try {
       const res = await syncChatHistory(selectedLeadId);
       if (res.imported > 0) {
-        toast.success(`Synced ${res.imported} new message(s)!`, { id: loadingToast });
-        loadMessages(); // reload messages
+        toast.success(`Fetched ${res.imported} message(s)!`, { id: loadingToast });
+      } else if (res.total > 0) {
+        toast.success(`Chat history loaded (${res.total} messages)`, { id: loadingToast });
       } else {
-        toast.success('Chat is already up to date', { id: loadingToast });
+        toast.success('Chat is up to date (no past history found on WhatsApp)', { id: loadingToast });
       }
+      await loadMessages();
+      await loadChats();
     } catch (err) {
-      toast.error('Failed to sync chat history', { id: loadingToast });
+      toast.error(err.response?.data?.detail || 'Failed to sync chat history', { id: loadingToast });
     }
   };
 

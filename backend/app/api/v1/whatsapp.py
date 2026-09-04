@@ -40,7 +40,10 @@ from app.services.whatsapp import (
     process_incoming_message,
     save_outbound_message,
     match_lead_by_phone,
-    _normalise_phone_for_wa
+    _normalise_phone_for_wa,
+    _extract_digits,
+    extract_content_and_media,
+    extract_timestamp,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,17 +81,17 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
     messages = data if isinstance(data, list) else [data]
 
     for msg_data in messages:
-        key = msg_data.get("key", {})
+        key = msg_data.get("key", {}) if isinstance(msg_data.get("key"), dict) else {}
 
-        is_from_me = key.get("fromMe", False)
+        is_from_me = bool(key.get("fromMe", False))
 
-        remote_jid = key.get("remoteJid", "")
+        remote_jid = str(key.get("remoteJid") or msg_data.get("remoteJid") or "")
         # Only process individual chats (not groups)
         if not remote_jid or "@g.us" in remote_jid:
             continue
 
         # Extract phone from JID: "919876543210@s.whatsapp.net" → "919876543210"
-        contact_phone = remote_jid.split("@")[0]
+        contact_phone = remote_jid.split("@")[0].split(":")[0]
 
         # Determine sender and receiver
         if is_from_me:
@@ -98,38 +101,12 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
             sender_phone = contact_phone
             receiver_phone = instance_name or ""
 
-        # Extract message content
-        message_obj = msg_data.get("message", {})
-        content = (
-            message_obj.get("conversation")
-            or message_obj.get("extendedTextMessage", {}).get("text")
-            or ""
-        )
+        # Extract message content and media
+        message_obj = msg_data.get("message")
+        content, media_type = extract_content_and_media(message_obj, msg_data)
 
-        # Media detection
-        media_type = None
-        media_url = None
-        if "imageMessage" in message_obj:
-            media_type = "image"
-            content = content or message_obj.get("imageMessage", {}).get("caption", "[Image]")
-        elif "videoMessage" in message_obj:
-            media_type = "video"
-            content = content or "[Video]"
-        elif "audioMessage" in message_obj:
-            media_type = "audio"
-            content = content or "[Voice Note]"
-        elif "documentMessage" in message_obj:
-            media_type = "document"
-            content = content or message_obj.get("documentMessage", {}).get("fileName", "[Document]")
-
-        whatsapp_msg_id = key.get("id")
-        msg_timestamp = msg_data.get("messageTimestamp")
-        ts = None
-        if msg_timestamp:
-            try:
-                ts = datetime.fromtimestamp(int(msg_timestamp), tz=timezone.utc)
-            except (ValueError, TypeError):
-                ts = None
+        whatsapp_msg_id = key.get("id") or msg_data.get("id")
+        ts = extract_timestamp(msg_data)
 
         try:
             await process_incoming_message(
@@ -138,9 +115,9 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
                 sender_phone=sender_phone,
                 receiver_phone=receiver_phone,
                 content=content if content else None,
-                whatsapp_msg_id=whatsapp_msg_id,
+                whatsapp_msg_id=str(whatsapp_msg_id) if whatsapp_msg_id else None,
                 media_type=media_type,
-                media_url=media_url,
+                media_url=None,
                 timestamp=ts,
                 is_from_me=is_from_me,
             )
@@ -164,17 +141,15 @@ async def list_chats(
     Returns a summary per lead: last message, timestamp, and unread count.
     Managers/admins see all chats; sales reps see only their assigned leads.
     """
-    # Subquery: latest message per lead for THIS user's instance
-    instance_name = f"rep_{current_user.id}"
+    from sqlalchemy import or_
+
+    # Subquery: latest message per lead
     latest_msg_sq = (
         select(
             WhatsAppMessage.lead_id,
             func.max(WhatsAppMessage.timestamp).label("last_ts"),
         )
-        .where(
-            WhatsAppMessage.lead_id.isnot(None),
-            WhatsAppMessage.instance_name == instance_name,
-        )
+        .where(WhatsAppMessage.lead_id.isnot(None))
         .group_by(WhatsAppMessage.lead_id)
         .subquery()
     )
@@ -198,7 +173,7 @@ async def list_chats(
         )
     )
 
-    # RBAC: sales reps only see their own leads
+    # RBAC: sales reps only see their own assigned leads
     if current_user.is_sales_rep:
         query = query.where(Lead.assigned_rep_id == current_user.id)
 
@@ -208,13 +183,12 @@ async def list_chats(
 
     chats = []
     for row in rows:
-        # Count unread (inbound messages not yet read — simplified: all inbound)
+        # Count unread
         unread_result = await db.execute(
             select(func.count(WhatsAppMessage.id)).where(
                 WhatsAppMessage.lead_id == row.lead_id,
                 WhatsAppMessage.direction == MessageDirection.inbound,
                 WhatsAppMessage.status != "read",
-                WhatsAppMessage.instance_name == instance_name,
             )
         )
         unread_count = unread_result.scalar() or 0
@@ -251,21 +225,16 @@ async def get_chat_messages(
     if current_user.is_sales_rep and lead.assigned_rep_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    instance_name = f"rep_{current_user.id}"
-
     result = await db.execute(
         select(WhatsAppMessage)
-        .where(
-            WhatsAppMessage.lead_id == lead_id,
-            WhatsAppMessage.instance_name == instance_name,
-        )
+        .where(WhatsAppMessage.lead_id == lead_id)
         .order_by(WhatsAppMessage.timestamp.asc())
     )
     messages = result.scalars().all()
 
     # Mark inbound messages as read
     for msg in messages:
-        if msg.direction == MessageDirection.inbound and msg.status.value != "read":
+        if msg.direction == MessageDirection.inbound and getattr(msg.status, "value", str(msg.status)) != "read":
             msg.status = "read"
     await db.commit()
 
@@ -529,6 +498,8 @@ async def sync_chat_history(
     this lead's phone number, deduplicates, and saves all new messages.
     Returns a count of newly imported messages.
     """
+    from sqlalchemy import delete, or_
+
     lead = await db.get(Lead, lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -540,118 +511,141 @@ async def sync_chat_history(
 
     instance_name = f"rep_{current_user.id}"
 
-    # Build the WhatsApp JID for this lead's phone number
-    # Auto-handle 10-digit numbers by prepending 91
+    # Build normalized phone numbers
     clean_phone = _normalise_phone_for_wa(lead.phone_number)
-    remote_jid = f"{clean_phone}@s.whatsapp.net"
-
-    # Fetch up to 50 historical messages from Evolution API
-    try:
-        raw_messages = await evo_client.fetch_messages(instance_name, remote_jid, count=50)
-    except Exception as exc:
-        logger.exception("Failed to fetch history from Evolution API: %s", exc)
-        raise HTTPException(
-            status_code=502,
-            detail="Could not fetch history from WhatsApp. Make sure your WhatsApp is still connected.",
-        )
+    digits = _extract_digits(lead.phone_number)
+    suffix10 = digits[-10:] if len(digits) >= 10 else digits
 
     imported = 0
+
+    # Step A: Link any unlinked or misassigned messages already stored in local DB
+    if suffix10:
+        unlinked_res = await db.execute(
+            select(WhatsAppMessage).where(
+                or_(
+                    WhatsAppMessage.sender_phone.like(f"%{suffix10}%"),
+                    WhatsAppMessage.receiver_phone.like(f"%{suffix10}%"),
+                )
+            )
+        )
+        for unlinked in unlinked_res.scalars().all():
+            if unlinked.lead_id != lead_id or unlinked.instance_name != instance_name:
+                unlinked.lead_id = lead_id
+                unlinked.user_id = lead.assigned_rep_id or current_user.id
+                unlinked.instance_name = instance_name
+                imported += 1
+
+    # Step B: Fetch historical messages from Evolution API (up to 50)
+    raw_messages = []
+    try:
+        raw_messages = await evo_client.fetch_messages(instance_name, clean_phone, count=50)
+    except Exception as exc:
+        logger.warning("fetch_messages failed for %s: %s", instance_name, exc)
+        raw_messages = []
+
     for raw in raw_messages:
-        key = raw.get("key", {})
-        wa_msg_id = key.get("id")
-        from_me = key.get("fromMe", False)
+        if not isinstance(raw, dict):
+            continue
+
+        key = raw.get("key", {}) if isinstance(raw.get("key"), dict) else {}
+        wa_msg_id = key.get("id") or raw.get("id") or raw.get("whatsapp_msg_id")
+        from_me = bool(key.get("fromMe") if "fromMe" in key else raw.get("fromMe", False))
 
         # Skip group messages
-        jid = key.get("remoteJid", "")
-        if "@g.us" in jid:
+        jid = key.get("remoteJid") or raw.get("remoteJid", "")
+        if "@g.us" in str(jid):
             continue
+
+        # Extract content & media type
+        message_obj = raw.get("message")
+        content, media_type = extract_content_and_media(message_obj, raw)
+
+        # Parse timestamp
+        ts = extract_timestamp(raw)
 
         # Dedup by whatsapp_msg_id
         if wa_msg_id:
-            existing = await db.execute(
-                select(WhatsAppMessage).where(WhatsAppMessage.whatsapp_msg_id == wa_msg_id)
+            existing_res = await db.execute(
+                select(WhatsAppMessage).where(WhatsAppMessage.whatsapp_msg_id == str(wa_msg_id))
             )
-            if existing.scalar_one_or_none():
+            existing = existing_res.scalar_one_or_none()
+            if existing:
+                if existing.lead_id != lead_id or existing.instance_name != instance_name:
+                    existing.lead_id = lead_id
+                    existing.user_id = lead.assigned_rep_id or current_user.id
+                    existing.instance_name = instance_name
+                    imported += 1
                 continue
-
-        # Extract content
-        message_obj = raw.get("message", {})
-        content = (
-            message_obj.get("conversation")
-            or message_obj.get("extendedTextMessage", {}).get("text")
-            or ""
-        )
-        media_type = None
-        if "imageMessage" in message_obj:
-            media_type = "image"
-            content = content or message_obj["imageMessage"].get("caption", "[Image]")
-        elif "videoMessage" in message_obj:
-            media_type = "video"
-            content = content or "[Video]"
-        elif "audioMessage" in message_obj:
-            media_type = "audio"
-            content = content or "[Voice Note]"
-        elif "documentMessage" in message_obj:
-            media_type = "document"
-            content = content or message_obj["documentMessage"].get("fileName", "[Document]")
-
-        # Parse timestamp
-        ts = None
-        raw_ts = raw.get("messageTimestamp")
-        if raw_ts:
-            try:
-                ts = datetime.fromtimestamp(int(raw_ts), tz=timezone.utc)
-            except (ValueError, TypeError):
-                ts = None
 
         direction = MessageDirection.outbound if from_me else MessageDirection.inbound
         sender = instance_name if from_me else clean_phone
         receiver = clean_phone if from_me else instance_name
 
+        synthetic_id = str(wa_msg_id) if wa_msg_id else f"evo_{lead_id}_{int(ts.timestamp())}_{1 if from_me else 0}"
+
         msg = WhatsAppMessage(
             lead_id=lead_id,
-            user_id=lead.assigned_rep_id,
-            whatsapp_msg_id=wa_msg_id,
+            user_id=lead.assigned_rep_id or current_user.id,
+            whatsapp_msg_id=synthetic_id,
             instance_name=instance_name,
             sender_phone=sender,
             receiver_phone=receiver,
             direction=direction,
             content=content if content else None,
             media_type=media_type,
-            status="delivered",
-            timestamp=ts or datetime.now(timezone.utc),
+            status=MessageStatus.delivered,
+            timestamp=ts,
         )
         db.add(msg)
         imported += 1
 
-    if imported == 0:
-        # Check if any messages exist for this chat already
-        existing_chat = await db.execute(
-            select(WhatsAppMessage).where(
+    # Clean up placeholder message if we have real messages
+    total_real_res = await db.execute(
+        select(func.count(WhatsAppMessage.id)).where(
+            WhatsAppMessage.lead_id == lead_id,
+            WhatsAppMessage.content != "[Chat Initialised - No previous history found]",
+        )
+    )
+    real_count = total_real_res.scalar() or 0
+
+    if real_count > 0 or imported > 0:
+        await db.execute(
+            delete(WhatsAppMessage).where(
                 WhatsAppMessage.lead_id == lead_id,
-                WhatsAppMessage.instance_name == instance_name
+                WhatsAppMessage.content == "[Chat Initialised - No previous history found]",
             )
         )
+        await db.commit()
+    else:
+        # Check if any message exists for this lead
+        existing_chat = await db.execute(
+            select(WhatsAppMessage).where(WhatsAppMessage.lead_id == lead_id)
+        )
         if not existing_chat.scalars().first():
-            # Initialise with a system message so the chat appears in the sidebar
             sys_msg = WhatsAppMessage(
                 lead_id=lead_id,
-                user_id=lead.assigned_rep_id,
+                user_id=lead.assigned_rep_id or current_user.id,
                 whatsapp_msg_id=f"sys_init_{lead_id}_{int(datetime.now().timestamp())}",
                 instance_name=instance_name,
                 sender_phone=instance_name,
                 receiver_phone=clean_phone,
                 direction=MessageDirection.outbound,
                 content="[Chat Initialised - No previous history found]",
-                status="delivered",
+                status=MessageStatus.delivered,
                 timestamp=datetime.now(timezone.utc),
             )
             db.add(sys_msg)
             await db.commit()
-    else:
-        await db.commit()
 
-    return {"imported": imported, "lead_id": lead_id}
+    total_all_res = await db.execute(
+        select(func.count(WhatsAppMessage.id)).where(
+            WhatsAppMessage.lead_id == lead_id,
+            WhatsAppMessage.content != "[Chat Initialised - No previous history found]",
+        )
+    )
+    final_total = total_all_res.scalar() or 0
+
+    return {"imported": imported, "total": final_total, "lead_id": lead_id}
 
 
 # ═══════════════════════════════════════════════════════════════════════
