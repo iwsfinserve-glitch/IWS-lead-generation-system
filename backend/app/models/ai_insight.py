@@ -18,7 +18,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base
+from app.db.base_class import Base
 
 # Use JSONB on PostgreSQL for efficient indexing; fallback to plain JSON elsewhere
 _JSON = JSON().with_variant(JSONB, "postgresql")

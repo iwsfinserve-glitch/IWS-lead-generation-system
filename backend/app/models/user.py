@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Integer, String, Enum, DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base
+from app.db.base_class import Base
 from app.models.enums import UserRole
 from sqlalchemy import ForeignKey
 
