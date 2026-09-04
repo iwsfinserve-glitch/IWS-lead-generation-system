@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { MessageCircle, Search, Phone, RefreshCw, X, History, User } from 'lucide-react';
+import { MessageCircle, Search, Phone, RefreshCw, X, User } from 'lucide-react';
 import { getLeadsWithoutChats, syncChatHistory } from '../../api/whatsappApi';
 import toast from 'react-hot-toast';
 
@@ -49,7 +49,7 @@ export default function StartChatModal({ onClose, onChatReady }) {
     );
   }, [leads, searchQuery]);
 
-  const handleSyncHistory = async () => {
+  const handleAddChat = async () => {
     if (!selectedLead) return;
     setSyncing(true);
     try {
@@ -58,26 +58,13 @@ export default function StartChatModal({ onClose, onChatReady }) {
       if (count > 0) {
         toast.success(`✅ Imported ${count} message${count !== 1 ? 's' : ''} from WhatsApp!`);
       } else {
-        toast(`No previous messages found with ${selectedLead.name} — starting fresh.`, { icon: 'ℹ️' });
+        toast(`Starting chat with ${selectedLead.name}`, { icon: '💬' });
       }
       onChatReady(selectedLead.id);
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to sync history');
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const handleStartFresh = async () => {
-    if (!selectedLead) return;
-    setSyncing(true);
-    try {
-      // Calling syncChatHistory will force the backend to inject the initialisation message 
-      // if no history exists, ensuring the chat appears in the sidebar.
-      await syncChatHistory(selectedLead.id);
+      // Even if sync fails, still open the chat — messages will come via webhook
+      toast.error(err.response?.data?.detail || 'Could not fetch history, but chat is ready');
       onChatReady(selectedLead.id);
-    } catch (err) {
-      toast.error('Failed to initialize chat');
     } finally {
       setSyncing(false);
     }
@@ -263,19 +250,10 @@ export default function StartChatModal({ onClose, onChatReady }) {
               </div>
             </div>
             <button
-              className="btn btn-ghost btn-sm"
-              onClick={handleStartFresh}
-              disabled={syncing}
-              id="start-chat-fresh-btn"
-              style={{ fontSize: '0.8rem' }}
-            >
-              Start Fresh
-            </button>
-            <button
               className="btn btn-primary btn-sm"
-              onClick={handleSyncHistory}
+              onClick={handleAddChat}
               disabled={syncing}
-              id="start-chat-sync-btn"
+              id="start-chat-add-btn"
               style={{
                 background: '#25D366', borderColor: '#25D366',
                 display: 'flex', alignItems: 'center', gap: 6,
@@ -283,9 +261,9 @@ export default function StartChatModal({ onClose, onChatReady }) {
               }}
             >
               {syncing ? (
-                <><RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> Syncing...</>
+                <><RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> Adding...</>
               ) : (
-                <><History size={12} /> Sync History</>
+                <><MessageCircle size={12} /> Add Chat</>
               )}
             </button>
           </div>

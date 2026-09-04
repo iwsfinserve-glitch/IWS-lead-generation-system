@@ -39,6 +39,7 @@ from app.services.whatsapp import (
     evo_client,
     process_incoming_message,
     save_outbound_message,
+    upsert_message,
     match_lead_by_phone,
     _normalise_phone_for_wa,
     _extract_digits,
@@ -494,11 +495,11 @@ async def sync_chat_history(
 ):
     """Fetch past WhatsApp messages from Evolution API and import into the CRM.
 
-    Reaches out to the Evolution API's findMessages endpoint, filters for
-    this lead's phone number, deduplicates, and saves all new messages.
+    Uses the correct Evolution API v2.3.7 format to fetch up to 100 messages
+    for this lead's phone number. Each message is deduplicated via upsert_message().
     Returns a count of newly imported messages.
     """
-    from sqlalchemy import delete, or_
+    from app.models.whatsapp_message import MessageDirection, MessageStatus
 
     lead = await db.get(Lead, lead_id)
     if not lead:
@@ -510,53 +511,18 @@ async def sync_chat_history(
         raise HTTPException(status_code=403, detail="Access denied")
 
     instance_name = f"rep_{current_user.id}"
-
-    # Build normalized phone numbers
     clean_phone = _normalise_phone_for_wa(lead.phone_number)
-    digits = _extract_digits(lead.phone_number)
-    suffix10 = digits[-10:] if len(digits) >= 10 else digits
+    user_id = lead.assigned_rep_id or current_user.id
 
     imported = 0
 
-    # Step A: Clean up any corrupted messages erroneously assigned to this lead from other contacts
-    if len(suffix10) == 10:
-        corrupted_res = await db.execute(
-            select(WhatsAppMessage).where(
-                WhatsAppMessage.lead_id == lead_id,
-                ~WhatsAppMessage.sender_phone.like(f"%{suffix10}%"),
-                ~WhatsAppMessage.receiver_phone.like(f"%{suffix10}%"),
-                WhatsAppMessage.content != "[Chat Initialised - No previous history found]",
-            )
-        )
-        for bad_msg in corrupted_res.scalars().all():
-            real_phone = bad_msg.sender_phone if bad_msg.direction == MessageDirection.inbound else bad_msg.receiver_phone
-            real_lead = await match_lead_by_phone(db, real_phone)
-            bad_msg.lead_id = real_lead.id if real_lead else None
-
-    # Step B: Link only unlinked orphan messages (where lead_id IS NULL)
-    if len(suffix10) == 10:
-        orphan_res = await db.execute(
-            select(WhatsAppMessage).where(
-                WhatsAppMessage.lead_id.is_(None),
-                or_(
-                    WhatsAppMessage.sender_phone.like(f"%{suffix10}%"),
-                    WhatsAppMessage.receiver_phone.like(f"%{suffix10}%"),
-                ),
-            )
-        )
-        for orphan in orphan_res.scalars().all():
-            orphan.lead_id = lead_id
-            orphan.user_id = lead.assigned_rep_id or current_user.id
-            orphan.instance_name = instance_name
-            imported += 1
-
-    # Step C: Fetch historical messages from Evolution API (up to 50)
+    # Fetch historical messages from Evolution API (up to 100)
     raw_messages = []
     try:
-        raw_messages = await evo_client.fetch_messages(instance_name, clean_phone, count=50)
+        raw_messages = await evo_client.fetch_messages(instance_name, clean_phone, count=100)
+        logger.info("sync_chat_history: fetched %d raw messages for lead %d", len(raw_messages), lead_id)
     except Exception as exc:
-        logger.warning("fetch_messages failed for %s: %s", instance_name, exc)
-        raw_messages = []
+        logger.warning("fetch_messages failed for lead %d (%s): %s", lead_id, instance_name, exc)
 
     for raw in raw_messages:
         if not isinstance(raw, dict):
@@ -566,9 +532,9 @@ async def sync_chat_history(
         wa_msg_id = key.get("id") or raw.get("id") or raw.get("whatsapp_msg_id")
         from_me = bool(key.get("fromMe") if "fromMe" in key else raw.get("fromMe", False))
 
-        # Skip group messages
-        jid = key.get("remoteJid") or raw.get("remoteJid", "")
-        if "@g.us" in str(jid):
+        # Skip group messages, broadcasts, newsletters
+        jid = str(key.get("remoteJid") or raw.get("remoteJid", ""))
+        if "@g.us" in jid or "@broadcast" in jid or "@newsletter" in jid:
             continue
 
         # Extract content & media type
@@ -578,92 +544,43 @@ async def sync_chat_history(
         # Parse timestamp
         ts = extract_timestamp(raw)
 
-        # Dedup by whatsapp_msg_id
-        if wa_msg_id:
-            existing_res = await db.execute(
-                select(WhatsAppMessage).where(WhatsAppMessage.whatsapp_msg_id == str(wa_msg_id))
-            )
-            existing = existing_res.scalar_one_or_none()
-            if existing:
-                if existing.lead_id is None:
-                    existing.lead_id = lead_id
-                    existing.user_id = lead.assigned_rep_id or current_user.id
-                    existing.instance_name = instance_name
-                    imported += 1
-                elif existing.lead_id == lead_id:
-                    if not existing.content and content:
-                        existing.content = content
-                continue
+        # Build a unique message ID (use WA ID if available, else synthesize)
+        msg_id = str(wa_msg_id) if wa_msg_id else f"evo_{lead_id}_{int(ts.timestamp())}_{1 if from_me else 0}"
 
         direction = MessageDirection.outbound if from_me else MessageDirection.inbound
         sender = instance_name if from_me else clean_phone
         receiver = clean_phone if from_me else instance_name
 
-        synthetic_id = str(wa_msg_id) if wa_msg_id else f"evo_{lead_id}_{int(ts.timestamp())}_{1 if from_me else 0}"
-
-        msg = WhatsAppMessage(
+        # Dedup + persist via unified helper
+        _msg, is_new = await upsert_message(
+            db,
             lead_id=lead_id,
-            user_id=lead.assigned_rep_id or current_user.id,
-            whatsapp_msg_id=synthetic_id,
+            user_id=user_id,
             instance_name=instance_name,
             sender_phone=sender,
             receiver_phone=receiver,
             direction=direction,
             content=content if content else None,
+            whatsapp_msg_id=msg_id,
             media_type=media_type,
-            status=MessageStatus.delivered,
             timestamp=ts,
         )
-        db.add(msg)
-        imported += 1
+        if is_new:
+            imported += 1
 
-    # Clean up placeholder message if we have real messages
-    total_real_res = await db.execute(
+    await db.commit()
+
+    # Count total messages for this lead
+    total_res = await db.execute(
         select(func.count(WhatsAppMessage.id)).where(
             WhatsAppMessage.lead_id == lead_id,
-            WhatsAppMessage.content != "[Chat Initialised - No previous history found]",
         )
     )
-    real_count = total_real_res.scalar() or 0
+    final_total = total_res.scalar() or 0
 
-    if real_count > 0 or imported > 0:
-        await db.execute(
-            delete(WhatsAppMessage).where(
-                WhatsAppMessage.lead_id == lead_id,
-                WhatsAppMessage.content == "[Chat Initialised - No previous history found]",
-            )
-        )
-        await db.commit()
-    else:
-        # Check if any message exists for this lead
-        existing_chat = await db.execute(
-            select(WhatsAppMessage).where(WhatsAppMessage.lead_id == lead_id)
-        )
-        if not existing_chat.scalars().first():
-            sys_msg = WhatsAppMessage(
-                lead_id=lead_id,
-                user_id=lead.assigned_rep_id or current_user.id,
-                whatsapp_msg_id=f"sys_init_{lead_id}_{int(datetime.now().timestamp())}",
-                instance_name=instance_name,
-                sender_phone=instance_name,
-                receiver_phone=clean_phone,
-                direction=MessageDirection.outbound,
-                content="[Chat Initialised - No previous history found]",
-                status=MessageStatus.delivered,
-                timestamp=datetime.now(timezone.utc),
-            )
-            db.add(sys_msg)
-            await db.commit()
-
-    total_all_res = await db.execute(
-        select(func.count(WhatsAppMessage.id)).where(
-            WhatsAppMessage.lead_id == lead_id,
-            WhatsAppMessage.content != "[Chat Initialised - No previous history found]",
-        )
-    )
-    final_total = total_all_res.scalar() or 0
-
+    logger.info("sync_chat_history: imported %d new messages for lead %d (total: %d)", imported, lead_id, final_total)
     return {"imported": imported, "total": final_total, "lead_id": lead_id}
+
 
 
 # ═══════════════════════════════════════════════════════════════════════

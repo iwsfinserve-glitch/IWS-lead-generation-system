@@ -128,168 +128,98 @@ class EvolutionAPIClient:
             resp.raise_for_status()
             return resp.json()
 
+    @staticmethod
+    def _parse_message_response(data) -> list[dict]:
+        """Parse Evolution API findMessages response into a flat list of message dicts.
+
+        Evolution API v2.x can return messages in several wrapper formats.
+        This normalises all of them into a simple list.
+        """
+        if isinstance(data, list):
+            return [d for d in data if isinstance(d, dict)]
+        if isinstance(data, dict):
+            for key in ["messages", "records", "data", "rows", "items"]:
+                val = data.get(key)
+                if isinstance(val, list):
+                    return [d for d in val if isinstance(d, dict)]
+                if isinstance(val, dict):
+                    inner = val.get("records") or val.get("rows") or val.get("data")
+                    if isinstance(inner, list):
+                        return [d for d in inner if isinstance(d, dict)]
+        return []
+
     async def fetch_messages(
         self,
         instance_name: str,
-        phone_or_jid: str,
-        count: int = 50,
+        phone: str,
+        count: int = 100,
     ) -> list[dict]:
-        """Fetch historical messages from Evolution API for a specific contact chat.
+        """Fetch message history from Evolution API for a specific contact.
 
-        Queries Evolution API for the specific contact's remoteJid.
-        Filters strictly so ONLY messages belonging to this contact are returned.
+        Uses the correct Evolution API v2.3.7 format:
+            POST /chat/findMessages/{instance}
+            body: {"number": "<phone_with_country_code>"}
+
+        Falls back to {"where": {"key": {"remoteJid": jid}}} for compatibility.
+
+        Args:
+            instance_name: The Evolution API session name (e.g. "rep_1").
+            phone: Contact phone in any format — digits are extracted and normalised.
+            count: Maximum number of messages to return (default 100).
         """
         import re
 
-        raw_phone = phone_or_jid.split("@")[0].split(":")[0] if "@" in phone_or_jid else phone_or_jid
-        digits = re.sub(r"\D", "", str(raw_phone or ""))
+        digits = re.sub(r"\D", "", str(phone or ""))
         if not digits:
             return []
 
-        suffix10 = digits[-10:] if len(digits) >= 10 else digits
-        clean_12 = f"91{suffix10}" if len(suffix10) == 10 else digits
-
-        # Construct candidate JIDs for this contact
-        candidate_jids = []
-        if "@s.whatsapp.net" in phone_or_jid or "@lid" in phone_or_jid:
-            candidate_jids.append(phone_or_jid)
+        # Normalize to 12-digit Indian format (91XXXXXXXXXX)
         if len(digits) == 10:
-            candidate_jids.append(f"91{digits}@s.whatsapp.net")
-            candidate_jids.append(f"{digits}@s.whatsapp.net")
+            digits = f"91{digits}"
         elif len(digits) == 11 and digits.startswith("0"):
-            candidate_jids.append(f"91{digits[1:]}@s.whatsapp.net")
-            candidate_jids.append(f"{digits[1:]}@s.whatsapp.net")
-        elif len(digits) == 12 and digits.startswith("91"):
-            candidate_jids.append(f"{digits}@s.whatsapp.net")
-            candidate_jids.append(f"{digits[2:]}@s.whatsapp.net")
-        else:
-            candidate_jids.append(f"{digits}@s.whatsapp.net")
+            digits = f"91{digits[1:]}"
 
-        seen = set()
-        target_jids = []
-        for j in candidate_jids:
-            if j not in seen:
-                seen.add(j)
-                target_jids.append(j)
+        jid = f"{digits}@s.whatsapp.net"
 
-        def _is_chat_message(m: dict) -> bool:
-            """Check if a message object belongs strictly to this contact."""
-            if not isinstance(m, dict):
-                return False
-            key = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
-            jid = str(key.get("remoteJid") or m.get("remoteJid") or "")
-            # Exclude groups, status broadcasts, newsletters
-            if not jid or "@g.us" in jid or "@broadcast" in jid or "@newsletter" in jid:
-                return False
-            
-            # Check exact JID match
-            if jid in target_jids:
-                return True
-            
-            # Check phone digits match
-            jid_phone = re.sub(r"\D", "", jid.split("@")[0].split(":")[0])
-            if not jid_phone:
-                return False
-            if jid_phone == clean_12 or jid_phone == digits:
-                return True
-            if len(suffix10) == 10 and jid_phone.endswith(suffix10):
-                return True
-            return False
-
-        def _parse_records(data) -> list[dict]:
-            if isinstance(data, list):
-                return [d for d in data if isinstance(d, dict)]
-            if isinstance(data, dict):
-                msgs = data.get("messages")
-                if isinstance(msgs, dict):
-                    rec = msgs.get("records") or msgs.get("rows") or msgs.get("data")
-                    if isinstance(rec, list):
-                        return [d for d in rec if isinstance(d, dict)]
-                elif isinstance(msgs, list):
-                    return [d for d in msgs if isinstance(d, dict)]
-                for k in ["records", "data", "rows", "items"]:
-                    rec = data.get(k)
-                    if isinstance(rec, list):
-                        return [d for d in rec if isinstance(d, dict)]
-            return []
-
-        async with httpx.AsyncClient(timeout=12) as client:
-            # Strategy 1: Direct findMessages with targeted where queries
-            for jid in target_jids:
-                for payload in [
-                    {"where": {"remoteJid": jid}, "limit": count},
-                    {"where": {"key": {"remoteJid": jid}}, "limit": count},
-                    {"where": {"key.remoteJid": jid}, "limit": count},
-                ]:
-                    try:
-                        resp = await client.post(
-                            self._url(f"/chat/findMessages/{instance_name}"),
-                            headers=self.headers,
-                            json=payload,
-                        )
-                        if resp.status_code == 200:
-                            recs = _parse_records(resp.json())
-                            filtered = [r for r in recs if _is_chat_message(r)]
-                            if filtered:
-                                return filtered[:count]
-                    except Exception as e:
-                        logger.debug("findMessages payload failed for %s: %s", jid, e)
-
-            # Strategy 2: Query findMessages with limit and filter strictly by this contact
+        async with httpx.AsyncClient(timeout=30) as client:
+            # Strategy 1: Use "number" field (correct per Evolution API v2.3.7 docs)
             try:
-                for fallback_payload in [{"limit": 100}, {}]:
-                    resp = await client.post(
-                        self._url(f"/chat/findMessages/{instance_name}"),
-                        headers=self.headers,
-                        json=fallback_payload,
-                    )
-                    if resp.status_code == 200:
-                        recs = _parse_records(resp.json())
-                        filtered = [r for r in recs if _is_chat_message(r)]
-                        if filtered:
-                            return filtered[:count]
-            except Exception as e:
-                logger.debug("findMessages fallback failed: %s", e)
-
-            # Strategy 3: Check findChats for this specific contact
-            try:
-                c_resp = await client.post(
-                    self._url(f"/chat/findChats/{instance_name}"),
+                resp = await client.post(
+                    self._url(f"/chat/findMessages/{instance_name}"),
                     headers=self.headers,
-                    json={},
+                    json={"number": digits},
                 )
-                if c_resp.status_code >= 400:
-                    c_resp = await client.get(
-                        self._url(f"/chat/findChats/{instance_name}"),
-                        headers=self.headers,
-                    )
-                if c_resp.status_code == 200:
-                    chats = _parse_records(c_resp.json())
-                    for ch in chats:
-                        ch_jid = str(ch.get("remoteJid") or ch.get("id") or ch.get("jid") or "")
-                        ch_phone = re.sub(r"\D", "", ch_jid.split("@")[0].split(":")[0])
-                        if (suffix10 and suffix10 in ch_phone) or ch_jid in target_jids:
-                            for p in [
-                                {"where": {"remoteJid": ch_jid}, "limit": count},
-                                {"where": {"key": {"remoteJid": ch_jid}}, "limit": count},
-                            ]:
-                                m_resp = await client.post(
-                                    self._url(f"/chat/findMessages/{instance_name}"),
-                                    headers=self.headers,
-                                    json=p,
-                                )
-                                if m_resp.status_code == 200:
-                                    recs = _parse_records(m_resp.json())
-                                    filtered = [r for r in recs if _is_chat_message(r)]
-                                    if filtered:
-                                        return filtered[:count]
-                            if ch.get("lastMessage") and isinstance(ch["lastMessage"], dict):
-                                if _is_chat_message(ch["lastMessage"]):
-                                    return [ch["lastMessage"]]
+                if resp.status_code == 200:
+                    messages = self._parse_message_response(resp.json())
+                    if messages:
+                        logger.info(
+                            "fetch_messages: got %d messages for %s via number field",
+                            len(messages), digits,
+                        )
+                        return messages[:count]
             except Exception as e:
-                logger.debug("findChats lookup failed: %s", e)
+                logger.warning("findMessages with number field failed: %s", e)
 
-            return []
+            # Strategy 2: Fallback with where.key.remoteJid (older API versions)
+            try:
+                resp = await client.post(
+                    self._url(f"/chat/findMessages/{instance_name}"),
+                    headers=self.headers,
+                    json={"where": {"key": {"remoteJid": jid}}},
+                )
+                if resp.status_code == 200:
+                    messages = self._parse_message_response(resp.json())
+                    if messages:
+                        logger.info(
+                            "fetch_messages: got %d messages for %s via remoteJid fallback",
+                            len(messages), jid,
+                        )
+                        return messages[:count]
+            except Exception as e:
+                logger.warning("findMessages with remoteJid fallback failed: %s", e)
+
+        logger.info("fetch_messages: no messages found for %s", digits)
+        return []
 
 
 # Singleton-ish — imported as `from app.services.whatsapp import evo_client`
@@ -449,6 +379,64 @@ async def match_lead_by_phone(db: AsyncSession, phone: str, assigned_rep_id: int
     return result.scalars().first()
 
 
+
+async def upsert_message(
+    db: AsyncSession,
+    *,
+    lead_id: int,
+    user_id: int | None,
+    instance_name: str,
+    sender_phone: str,
+    receiver_phone: str,
+    direction: MessageDirection,
+    content: str | None,
+    whatsapp_msg_id: str | None,
+    media_type: str | None = None,
+    media_url: str | None = None,
+    timestamp: datetime | None = None,
+) -> tuple[WhatsAppMessage, bool]:
+    """Insert a message if it doesn't already exist (by whatsapp_msg_id).
+
+    Returns:
+        (message, is_new): The message object and whether it was newly created.
+    """
+    # Dedup by whatsapp_msg_id
+    if whatsapp_msg_id:
+        existing_res = await db.execute(
+            select(WhatsAppMessage).where(WhatsAppMessage.whatsapp_msg_id == str(whatsapp_msg_id))
+        )
+        existing = existing_res.scalar_one_or_none()
+        if existing:
+            # If it exists but wasn't linked to a lead, link it now
+            changed = False
+            if existing.lead_id is None and lead_id:
+                existing.lead_id = lead_id
+                existing.user_id = user_id
+                existing.instance_name = instance_name
+                changed = True
+            if not existing.content and content:
+                existing.content = content
+                changed = True
+            return existing, changed
+
+    msg = WhatsAppMessage(
+        lead_id=lead_id,
+        user_id=user_id,
+        whatsapp_msg_id=whatsapp_msg_id,
+        instance_name=instance_name,
+        sender_phone=sender_phone,
+        receiver_phone=receiver_phone,
+        direction=direction,
+        content=content,
+        media_type=media_type,
+        media_url=media_url,
+        status=MessageStatus.delivered,
+        timestamp=timestamp or datetime.now(timezone.utc),
+    )
+    db.add(msg)
+    return msg, True
+
+
 async def process_incoming_message(
     db: AsyncSession,
     *,
@@ -465,11 +453,11 @@ async def process_incoming_message(
     """Process an inbound WhatsApp message from the Evolution API webhook.
 
     1. Match the correct phone number (sender if inbound, receiver if outbound) to a Lead.
-    2. Find the assigned sales rep.
-    3. Save the WhatsAppMessage row.
-    4. Log a LeadTimeline entry for AI context.
+    2. Use upsert_message() for dedup + persistence.
+    3. Log a LeadTimeline entry for AI context.
+    4. Create in-app notification for inbound messages.
     """
-    # 1. Match lead (only match leads assigned to this WhatsApp instance's user!)
+    # 1. Match lead (only match leads assigned to this WhatsApp instance's user)
     rep_id = None
     if instance_name and instance_name.startswith("rep_"):
         try:
@@ -485,41 +473,37 @@ async def process_incoming_message(
 
     lead_id = lead.id
     user_id = lead.assigned_rep_id
+    direction = MessageDirection.outbound if is_from_me else MessageDirection.inbound
 
-    # 2. Dedup — skip if we already stored this message
-    if whatsapp_msg_id:
-        existing = await db.execute(
-            select(WhatsAppMessage).where(WhatsAppMessage.whatsapp_msg_id == whatsapp_msg_id)
-        )
-        if existing.scalar_one_or_none():
-            logger.debug("Duplicate message %s, skipping", whatsapp_msg_id)
-            return existing.scalar_one_or_none()
-
-    # 3. Persist message
-    msg = WhatsAppMessage(
+    # 2. Dedup + persist via unified helper
+    msg, is_new = await upsert_message(
+        db,
         lead_id=lead_id,
         user_id=user_id,
-        whatsapp_msg_id=whatsapp_msg_id,
         instance_name=instance_name,
         sender_phone=sender_phone,
         receiver_phone=receiver_phone,
-        direction=MessageDirection.outbound if is_from_me else MessageDirection.inbound,
+        direction=direction,
         content=content,
+        whatsapp_msg_id=whatsapp_msg_id,
         media_type=media_type,
         media_url=media_url,
-        status=MessageStatus.delivered,
-        timestamp=timestamp or datetime.now(timezone.utc),
+        timestamp=timestamp,
     )
-    db.add(msg)
 
-    # 4. Log to LeadTimeline and create in-app Notification
+    if not is_new:
+        # Duplicate — just commit any link updates and return
+        await db.commit()
+        return msg
+
+    # 3. Log to LeadTimeline
     preview = (content or "")[:200]
     timeline_entry = LeadTimeline(
         lead_id=lead_id,
         user_id=user_id,
         event_type="whatsapp_message",
         event_metadata={
-            "direction": "inbound" if not is_from_me else "outbound",
+            "direction": direction.value,
             "sender_phone": sender_phone,
             "content_preview": preview,
             "media_type": media_type,
@@ -527,7 +511,7 @@ async def process_incoming_message(
     )
     db.add(timeline_entry)
 
-    # Only notify if it's an inbound message
+    # 4. Notify on inbound messages only
     if not is_from_me and user_id:
         lead_display = lead.name or sender_phone
         notif = Notification(
@@ -539,15 +523,6 @@ async def process_incoming_message(
             link_id=lead_id,
         )
         db.add(notif)
-
-    # Clean up any initialization placeholder message for this lead
-    from sqlalchemy import delete
-    await db.execute(
-        delete(WhatsAppMessage).where(
-            WhatsAppMessage.lead_id == lead_id,
-            WhatsAppMessage.content == "[Chat Initialised - No previous history found]",
-        )
-    )
 
     await db.commit()
     await db.refresh(msg)
@@ -566,41 +541,35 @@ async def save_outbound_message(
     whatsapp_msg_id: str | None = None,
 ) -> WhatsAppMessage:
     """Save an outbound message sent from the CRM and log to timeline."""
-    msg = WhatsAppMessage(
+    msg, is_new = await upsert_message(
+        db,
         lead_id=lead_id,
         user_id=user_id,
-        whatsapp_msg_id=whatsapp_msg_id,
         instance_name=instance_name,
         sender_phone=sender_phone,
         receiver_phone=receiver_phone,
         direction=MessageDirection.outbound,
         content=content,
-        status=MessageStatus.sent,
-        timestamp=datetime.now(timezone.utc),
+        whatsapp_msg_id=whatsapp_msg_id,
     )
-    db.add(msg)
 
-    # Log timeline
-    preview = content[:200]
-    timeline_entry = LeadTimeline(
-        lead_id=lead_id,
-        user_id=user_id,
-        event_type="whatsapp_message",
-        event_metadata={
-            "direction": "outbound",
-            "receiver_phone": receiver_phone,
-            "content_preview": preview,
-        },
-    )
-    db.add(timeline_entry)
+    # Override status for CRM-sent messages
+    msg.status = MessageStatus.sent
 
-    from sqlalchemy import delete
-    await db.execute(
-        delete(WhatsAppMessage).where(
-            WhatsAppMessage.lead_id == lead_id,
-            WhatsAppMessage.content == "[Chat Initialised - No previous history found]",
+    if is_new:
+        # Log timeline
+        preview = content[:200]
+        timeline_entry = LeadTimeline(
+            lead_id=lead_id,
+            user_id=user_id,
+            event_type="whatsapp_message",
+            event_metadata={
+                "direction": "outbound",
+                "receiver_phone": receiver_phone,
+                "content_preview": preview,
+            },
         )
-    )
+        db.add(timeline_entry)
 
     await db.commit()
     await db.refresh(msg)

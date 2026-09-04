@@ -87,8 +87,8 @@ export default function WhatsAppInbox() {
   useEffect(() => {
     if (selectedLeadId) {
       loadMessages();
-      // Poll for new messages every 5s when a chat is open
-      msgPollRef.current = setInterval(loadMessages, 5000);
+      // Poll for new messages every 3s when a chat is open
+      msgPollRef.current = setInterval(loadMessages, 3000);
     }
     return () => {
       if (msgPollRef.current) clearInterval(msgPollRef.current);
@@ -105,14 +105,32 @@ export default function WhatsAppInbox() {
     e.preventDefault();
     if (!newMessage.trim() || !selectedLeadId || sending) return;
 
+    const messageText = newMessage.trim();
     setSending(true);
+
+    // Optimistic UI: show message instantly before API confirms
+    const optimisticMsg = {
+      id: `optimistic_${Date.now()}`,
+      direction: 'outbound',
+      content: messageText,
+      timestamp: new Date().toISOString(),
+      status: 'sending',
+    };
+    setMessages((prev) => [...prev, optimisticMsg]);
+    setNewMessage('');
+
     try {
-      const sentMsg = await sendWhatsAppMessage(selectedLeadId, newMessage.trim());
-      setMessages((prev) => [...prev, sentMsg]);
-      setNewMessage('');
+      const sentMsg = await sendWhatsAppMessage(selectedLeadId, messageText);
+      // Replace optimistic message with real one
+      setMessages((prev) =>
+        prev.map((m) => (m.id === optimisticMsg.id ? sentMsg : m))
+      );
       // Refresh chat list to update last message preview
       loadChats();
     } catch (err) {
+      // Remove optimistic message on failure
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticMsg.id));
+      setNewMessage(messageText); // Restore the message text
       toast.error(err.response?.data?.detail || 'Failed to send message');
     } finally {
       setSending(false);
@@ -146,25 +164,43 @@ export default function WhatsAppInbox() {
   };
 
   // ── Sync Chat History ───────────────────────────────────────────────
-  const handleSyncChat = async () => {
-    if (!selectedLeadId) return;
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSyncChat = async (silent = false) => {
+    if (!selectedLeadId || syncing) return;
     
-    const loadingToast = toast.loading('Fetching last 50 messages...');
+    setSyncing(true);
+    const loadingToast = silent ? null : toast.loading('Syncing messages...');
     try {
       const res = await syncChatHistory(selectedLeadId);
-      if (res.imported > 0) {
-        toast.success(`Fetched ${res.imported} message(s)!`, { id: loadingToast });
-      } else if (res.total > 0) {
-        toast.success(`Chat history loaded (${res.total} messages)`, { id: loadingToast });
-      } else {
-        toast.success('Chat is up to date (no past history found on WhatsApp)', { id: loadingToast });
+      if (!silent) {
+        if (res.imported > 0) {
+          toast.success(`Synced ${res.imported} message(s)!`, { id: loadingToast });
+        } else if (res.total > 0) {
+          toast.success(`Chat is up to date (${res.total} messages)`, { id: loadingToast });
+        } else {
+          toast.success('No message history found on WhatsApp', { id: loadingToast });
+        }
+      } else if (loadingToast) {
+        toast.dismiss(loadingToast);
       }
       await loadMessages();
       await loadChats();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to sync chat history', { id: loadingToast });
+      if (!silent) {
+        toast.error(err.response?.data?.detail || 'Failed to sync chat history', { id: loadingToast });
+      }
+    } finally {
+      setSyncing(false);
     }
   };
+
+  // ── Auto-sync when opening a chat with 0 messages ──────────────────
+  useEffect(() => {
+    if (selectedLeadId && messages.length === 0 && !syncing && connectionStatus === 'open') {
+      handleSyncChat(true); // silent sync
+    }
+  }, [selectedLeadId, messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Filter chats by search ────────────────────────────────────────
   const filteredChats = chats.filter((c) =>
