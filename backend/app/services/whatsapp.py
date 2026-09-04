@@ -140,12 +140,10 @@ class EvolutionAPIClient:
     ) -> list[dict]:
         """Fetch historical messages from Evolution API for a specific chat or contact.
 
-        Uses multiple fallback strategies to guarantee compatibility across
-        different Evolution API versions, database backends (TypeORM / Postgres vs MongoDB),
-        and WhatsApp JID variations (with/without country code, @lid, etc.):
-        1. Discover JIDs/LIDs via findChats and findContacts (by phone & name).
-        2. Targeted findMessages with candidate JIDs and query shapes (nested vs flat where vs direct).
-        3. Fetch broad instance messages (limit 1000) and apply client-side filtering.
+        Uses a fast, tiered strategy with explicit request timeouts (max 8s total):
+        1. Fast direct findMessages query with primary candidate JIDs.
+        2. Fast findChats discovery to find @lid or internal JID if direct query missed.
+        3. Fast client-side filter of recent 200 messages as fallback.
         4. Fallback to lastMessage from findChats.
         """
         raw_phone = phone_or_jid.split("@")[0] if "@" in phone_or_jid else phone_or_jid
@@ -160,8 +158,14 @@ class EvolutionAPIClient:
             candidate_jids.append(f"{clean_phone}@s.whatsapp.net")
         if suffix10 and suffix10 != clean_phone:
             candidate_jids.append(f"{suffix10}@s.whatsapp.net")
-        if digits and digits != clean_phone and digits != suffix10:
-            candidate_jids.append(f"{digits}@s.whatsapp.net")
+
+        # Deduplicate
+        seen_jids = set()
+        unique_candidate_jids = []
+        for j in candidate_jids:
+            if j and j not in seen_jids:
+                seen_jids.add(j)
+                unique_candidate_jids.append(j)
 
         def _parse_records(data) -> list[dict]:
             if isinstance(data, list):
@@ -180,10 +184,32 @@ class EvolutionAPIClient:
                         return [item for item in val if isinstance(item, dict)]
             return []
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            last_msg_fallback = None
+        timeout_cfg = httpx.Timeout(6.0, connect=3.0)
 
-            # ── Step 1: Discover JIDs / LIDs from findChats ──
+        async with httpx.AsyncClient(timeout=timeout_cfg) as client:
+            # ── Tier 1: Fast direct findMessages with primary candidate JIDs ──
+            for c_jid in unique_candidate_jids:
+                for payload in [
+                    {"where": {"key": {"remoteJid": c_jid}}, "limit": count},
+                    {"where": {"remoteJid": c_jid}, "limit": count},
+                ]:
+                    try:
+                        resp = await client.post(
+                            self._url(f"/chat/findMessages/{instance_name}"),
+                            headers=self.headers,
+                            json=payload,
+                        )
+                        if resp.status_code == 200:
+                            records = _parse_records(resp.json())
+                            if records:
+                                logger.info("fetch_messages: Tier 1 found %d messages for %s", len(records), c_jid)
+                                return records
+                    except Exception as e:
+                        logger.debug("Tier 1 direct query failed for %s: %s", c_jid, e)
+
+            # ── Tier 2: Discover exact chat JID/@lid from findChats ──
+            last_msg_fallback = None
+            discovered_jids = []
             try:
                 c_resp = await client.post(
                     self._url(f"/chat/findChats/{instance_name}"),
@@ -200,8 +226,8 @@ class EvolutionAPIClient:
                     for ch in chats:
                         if not isinstance(ch, dict):
                             continue
-                        ch_jid = ch.get("remoteJid") or ch.get("id") or ch.get("jid") or ""
-                        ch_digits = _extract_digits(str(ch_jid).split("@")[0])
+                        ch_jid = str(ch.get("remoteJid") or ch.get("id") or ch.get("jid") or "")
+                        ch_digits = _extract_digits(ch_jid.split("@")[0])
                         ch_phone = _extract_digits(ch.get("phone") or ch.get("phoneNumber") or "")
                         ch_name = (ch.get("name") or ch.get("pushName") or "").lower()
 
@@ -213,138 +239,74 @@ class EvolutionAPIClient:
                         elif lead_name and len(lead_name.strip()) >= 3 and lead_name.lower().strip() in ch_name:
                             is_match = True
 
-                        if is_match:
-                            if ch_jid and ch_jid not in candidate_jids:
-                                candidate_jids.append(str(ch_jid))
+                        if is_match and ch_jid:
+                            discovered_jids.append(ch_jid)
                             if ch.get("lastMessage"):
                                 last_msg_fallback = ch["lastMessage"]
+
+                for d_jid in discovered_jids:
+                    if d_jid in seen_jids:
+                        continue
+                    seen_jids.add(d_jid)
+                    for payload in [
+                        {"where": {"key": {"remoteJid": d_jid}}, "limit": count},
+                        {"where": {"remoteJid": d_jid}, "limit": count},
+                    ]:
+                        try:
+                            resp = await client.post(
+                                self._url(f"/chat/findMessages/{instance_name}"),
+                                headers=self.headers,
+                                json=payload,
+                            )
+                            if resp.status_code == 200:
+                                records = _parse_records(resp.json())
+                                if records:
+                                    logger.info("fetch_messages: Tier 2 found %d messages for %s", len(records), d_jid)
+                                    return records
+                        except Exception as e:
+                            logger.debug("Tier 2 query failed for %s: %s", d_jid, e)
             except Exception as e:
-                logger.debug("findChats discovery failed: %s", e)
+                logger.debug("Tier 2 findChats failed: %s", e)
 
-            # ── Step 2: Discover JIDs / LIDs from findContacts ──
+            # ── Tier 3: Client-side filtering of recent messages (limit 200) ──
             try:
-                cnt_resp = await client.post(
-                    self._url(f"/chat/findContacts/{instance_name}"),
-                    headers=self.headers,
-                    json={},
-                )
-                if cnt_resp.status_code >= 400:
-                    cnt_resp = await client.get(
-                        self._url(f"/chat/findContacts/{instance_name}"),
-                        headers=self.headers,
-                    )
-                if cnt_resp.status_code == 200:
-                    contacts = _parse_records(cnt_resp.json())
-                    for cnt in contacts:
-                        if not isinstance(cnt, dict):
-                            continue
-                        cnt_jid = cnt.get("remoteJid") or cnt.get("id") or cnt.get("jid") or ""
-                        cnt_digits = _extract_digits(str(cnt_jid).split("@")[0])
-                        cnt_phone = _extract_digits(cnt.get("number") or cnt.get("phone") or cnt.get("phoneNumber") or "")
-                        cnt_name = (cnt.get("name") or cnt.get("pushName") or "").lower()
-
-                        is_match = False
-                        if suffix10 and (suffix10 in cnt_digits or suffix10 in cnt_phone):
-                            is_match = True
-                        elif clean_phone and (clean_phone in cnt_digits or clean_phone in cnt_phone):
-                            is_match = True
-                        elif lead_name and len(lead_name.strip()) >= 3 and lead_name.lower().strip() in cnt_name:
-                            is_match = True
-
-                        if is_match:
-                            if cnt_jid and cnt_jid not in candidate_jids:
-                                candidate_jids.append(str(cnt_jid))
-                            r_jid = cnt.get("remoteJid")
-                            if r_jid and r_jid not in candidate_jids:
-                                candidate_jids.append(str(r_jid))
-            except Exception as e:
-                logger.debug("findContacts discovery failed: %s", e)
-
-            # Deduplicate preserving order
-            seen_jids = set()
-            unique_candidate_jids = []
-            for j in candidate_jids:
-                if j and j not in seen_jids:
-                    seen_jids.add(j)
-                    unique_candidate_jids.append(j)
-
-            # ── Step 3: Targeted findMessages with candidate JIDs & query shapes ──
-            for c_jid in unique_candidate_jids:
-                payloads = [
-                    {"where": {"key": {"remoteJid": c_jid}}, "limit": count},
-                    {"where": {"remoteJid": c_jid}, "limit": count},
-                    {"remoteJid": c_jid, "limit": count},
-                    {"where": {"key.remoteJid": c_jid}, "limit": count},
-                ]
-                for p in payloads:
-                    try:
-                        resp = await client.post(
-                            self._url(f"/chat/findMessages/{instance_name}"),
-                            headers=self.headers,
-                            json=p,
-                        )
-                        if resp.status_code == 200:
-                            records = _parse_records(resp.json())
-                            if records:
-                                logger.info(
-                                    "fetch_messages: Found %d messages for %s using payload %s",
-                                    len(records), c_jid, list(p.keys())
-                                )
-                                return records
-                    except Exception as e:
-                        logger.debug("Strategy targeted query failed for %s: %s", c_jid, e)
-
-            # ── Step 4: Client-side filtering of broad messages (limit 1000) ──
-            try:
-                for broad_url in [
+                resp = await client.post(
                     self._url(f"/chat/findMessages/{instance_name}"),
-                    self._url(f"/messages/fetch/{instance_name}"),
-                ]:
-                    try:
-                        resp = await client.post(
-                            broad_url,
-                            headers=self.headers,
-                            json={"limit": 1000},
-                        )
-                        if resp.status_code >= 400:
-                            resp = await client.get(broad_url, headers=self.headers)
-                        if resp.status_code == 200:
-                            all_records = _parse_records(resp.json())
-                            filtered = []
-                            for r in all_records:
-                                if not isinstance(r, dict):
-                                    continue
-                                r_key = r.get("key", {}) if isinstance(r.get("key"), dict) else {}
-                                r_jid = str(r_key.get("remoteJid") or r.get("remoteJid") or "")
-                                r_part = str(r_key.get("participant") or r.get("participant") or "")
-                                r_digits = _extract_digits(r_jid.split("@")[0])
-                                r_part_digits = _extract_digits(r_part.split("@")[0])
+                    headers=self.headers,
+                    json={"limit": 200},
+                )
+                if resp.status_code == 200:
+                    all_records = _parse_records(resp.json())
+                    filtered = []
+                    for r in all_records:
+                        if not isinstance(r, dict):
+                            continue
+                        r_key = r.get("key", {}) if isinstance(r.get("key"), dict) else {}
+                        r_jid = str(r_key.get("remoteJid") or r.get("remoteJid") or "")
+                        r_part = str(r_key.get("participant") or r.get("participant") or "")
+                        r_digits = _extract_digits(r_jid.split("@")[0])
+                        r_part_digits = _extract_digits(r_part.split("@")[0])
 
-                                is_msg_match = False
-                                if suffix10 and (suffix10 in r_digits or suffix10 in r_part_digits):
-                                    is_msg_match = True
-                                elif clean_phone and (clean_phone in r_digits or clean_phone in r_part_digits):
-                                    is_msg_match = True
-                                elif r_jid in seen_jids or r_part in seen_jids:
-                                    is_msg_match = True
+                        is_msg_match = False
+                        if suffix10 and (suffix10 in r_digits or suffix10 in r_part_digits):
+                            is_msg_match = True
+                        elif clean_phone and (clean_phone in r_digits or clean_phone in r_part_digits):
+                            is_msg_match = True
+                        elif r_jid in seen_jids or r_part in seen_jids:
+                            is_msg_match = True
 
-                                if is_msg_match:
-                                    filtered.append(r)
+                        if is_msg_match:
+                            filtered.append(r)
 
-                            if filtered:
-                                logger.info(
-                                    "fetch_messages: Client-side filter found %d messages for suffix %s",
-                                    len(filtered), suffix10
-                                )
-                                return filtered
-                    except Exception as e:
-                        logger.debug("Broad query %s failed: %s", broad_url, e)
+                    if filtered:
+                        logger.info("fetch_messages: Tier 3 client-side filter found %d messages", len(filtered))
+                        return filtered
             except Exception as e:
-                logger.debug("Broad fetch failed: %s", e)
+                logger.debug("Tier 3 client-side filter failed: %s", e)
 
-            # ── Step 5: Fallback to lastMessage from findChats ──
+            # ── Tier 4: Fallback to lastMessage from findChats ──
             if last_msg_fallback and isinstance(last_msg_fallback, dict):
-                logger.info("fetch_messages: Falling back to lastMessage from findChats for %s", suffix10)
+                logger.info("fetch_messages: Tier 4 fallback to lastMessage for %s", suffix10)
                 return [last_msg_fallback]
 
             return []
