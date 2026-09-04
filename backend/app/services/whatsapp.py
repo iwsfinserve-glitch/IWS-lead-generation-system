@@ -10,6 +10,7 @@ The Evolution API runs as a sibling Railway service and exposes a REST API
 authenticated by a global API key.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -264,8 +265,8 @@ class EvolutionAPIClient:
     ) -> list[dict]:
         """Fetch message history from Evolution API for a specific contact.
 
-        Supports multi-instance auto-discovery, @lid Privacy JIDs (remoteJidAlt/participantAlt),
-        multi-device JIDs (:0), where queries, and batch client-side filtering.
+        Directly queries all active open instances, extracts messages matching
+        phone digits, JID, or @lid privacy identifiers, and returns them immediately.
         """
         import re
 
@@ -284,12 +285,12 @@ class EvolutionAPIClient:
         ]))
 
         def _is_chat_message(m: dict) -> bool:
-            """Check if a message dict strictly belongs to this lead contact."""
+            """Check if a message dict belongs to this contact."""
             if not isinstance(m, dict):
                 return False
             key = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
             
-            # Skip group messages, broadcasts, newsletters
+            # Skip groups, broadcasts, newsletters
             for raw_jid in [key.get("remoteJid"), m.get("remoteJid"), m.get("chatId")]:
                 if raw_jid and ("@g.us" in str(raw_jid) or "@broadcast" in str(raw_jid) or "@newsletter" in str(raw_jid)):
                     return False
@@ -298,7 +299,7 @@ class EvolutionAPIClient:
             if msg_phone:
                 if msg_phone == clean_12 or msg_phone == digits:
                     return True
-                if len(suffix10) == 10 and (msg_phone.endswith(suffix10) or suffix10 in msg_phone):
+                if len(suffix10) >= 10 and (msg_phone.endswith(suffix10) or suffix10 in msg_phone):
                     return True
 
             for jid_val in [key.get("remoteJidAlt"), key.get("remoteJid"), key.get("participantAlt"), m.get("remoteJid")]:
@@ -311,83 +312,54 @@ class EvolutionAPIClient:
                         return True
             return False
 
-        async with httpx.AsyncClient(timeout=25) as client:
-            # 1. Discover all candidate instances (passed instance + any open instances in Evolution API)
-            candidate_instances = [instance_name] if instance_name else []
+        async with httpx.AsyncClient(timeout=10) as client:
+            # 1. Discover all open candidate instances
+            candidate_instances = []
+            if instance_name:
+                candidate_instances.append(instance_name)
+
             try:
                 list_resp = await client.get(self._url("/instance/fetchInstances"), headers=self.headers)
                 if list_resp.status_code == 200:
                     inst_data = list_resp.json() if isinstance(list_resp.json(), list) else []
                     for inst in inst_data:
                         name = inst.get("name")
-                        if name and name not in candidate_instances:
-                            if inst.get("connectionStatus") == "open":
-                                candidate_instances.insert(0 if not instance_name else 1, name)
-                            else:
-                                candidate_instances.append(name)
+                        status = inst.get("connectionStatus")
+                        if name and status == "open" and name not in candidate_instances:
+                            candidate_instances.append(name)
             except Exception as e:
                 logger.debug("Failed to list candidate instances: %s", e)
 
-            for inst in candidate_instances:
-                if not inst:
-                    continue
-
-                # Strategy 1: "number" field
-                for num in candidate_numbers:
-                    try:
-                        resp = await client.post(
-                            self._url(f"/chat/findMessages/{inst}"),
-                            headers=self.headers,
-                            json={"number": num},
-                        )
-                        if resp.status_code == 200:
-                            messages = self._parse_message_response(resp.json())
-                            filtered = [m for m in messages if _is_chat_message(m)]
-                            if filtered:
-                                logger.info("fetch_messages: got %d messages via number=%s on instance=%s", len(filtered), num, inst)
-                                return filtered[:count]
-                    except Exception as e:
-                        logger.debug("findMessages with number=%s on %s failed: %s", num, inst, e)
-
-                # Strategy 2: "where" filters for remoteJid / remoteJidAlt
-                for jid in candidate_jids:
-                    for payload in [
-                        {"where": {"key": {"remoteJidAlt": jid}}, "limit": count},
-                        {"where": {"key": {"remoteJid": jid}}, "limit": count},
-                        {"where": {"remoteJid": jid}, "limit": count},
-                        {"where": {"key.remoteJid": jid}, "limit": count},
-                    ]:
-                        try:
-                            resp = await client.post(
-                                self._url(f"/chat/findMessages/{inst}"),
-                                headers=self.headers,
-                                json=payload,
-                            )
-                            if resp.status_code == 200:
-                                messages = self._parse_message_response(resp.json())
-                                filtered = [m for m in messages if _is_chat_message(m)]
-                                if filtered:
-                                    logger.info("fetch_messages: got %d messages via where payload on %s (%s)", len(filtered), inst, jid)
-                                    return filtered[:count]
-                        except Exception as e:
-                            logger.debug("findMessages payload %s on %s failed: %s", payload, inst, e)
-
-                # Strategy 3: Batch fetch and client-side filter
+            # 2. Parallel Fast Batch Fetch across all open instances
+            async def _query_instance_batch(inst: str) -> list[dict]:
                 try:
-                    for fallback_payload in [{"limit": 100}, {"limit": 50}, {}]:
-                        resp = await client.post(
-                            self._url(f"/chat/findMessages/{inst}"),
-                            headers=self.headers,
-                            json=fallback_payload,
-                        )
-                        if resp.status_code == 200:
-                            msgs = self._parse_message_response(resp.json())
-                            filtered = [m for m in msgs if _is_chat_message(m)]
-                            if filtered:
-                                logger.info("fetch_messages: got %d messages via batch fallback on instance %s", len(filtered), inst)
-                                return filtered[:count]
+                    resp = await client.post(
+                        self._url(f"/chat/findMessages/{inst}"),
+                        headers=self.headers,
+                        json={"limit": count},
+                    )
+                    if resp.status_code == 200:
+                        return self._parse_message_response(resp.json())
                 except Exception as e:
-                    logger.debug("findMessages batch fallback on %s failed: %s", inst, e)
+                    logger.debug("Batch findMessages failed on %s: %s", inst, e)
+                return []
+
+            batch_results = await asyncio.gather(*(_query_instance_batch(inst) for inst in candidate_instances if inst))
+            all_records = [m for sublist in batch_results for m in sublist]
+            filtered = [m for m in all_records if _is_chat_message(m)]
+            if filtered:
+                # Deduplicate by message ID or timestamp
+                seen_ids = set()
+                deduped = []
+                for m in filtered:
+                    m_id = str(m.get("key", {}).get("id") or m.get("id") or m.get("whatsapp_msg_id") or "")
+                    if m_id and m_id in seen_ids:
+                        continue
+                    if m_id:
+                        seen_ids.add(m_id)
+                    deduped.append(m)
+                logger.info("fetch_messages: got %d deduplicated messages for %s", len(deduped), digits)
+                return deduped[:count]
 
         logger.info("fetch_messages: no messages found on Evolution API for %s", digits)
         return []

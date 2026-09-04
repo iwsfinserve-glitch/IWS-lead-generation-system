@@ -193,7 +193,12 @@ async def list_chats(
     rows = result.all()
 
     chats = []
+    seen_lead_ids = set()
     for row in rows:
+        if row.lead_id in seen_lead_ids:
+            continue
+        seen_lead_ids.add(row.lead_id)
+
         # Count unread
         unread_result = await db.execute(
             select(func.count(WhatsAppMessage.id)).where(
