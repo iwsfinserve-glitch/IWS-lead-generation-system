@@ -64,6 +64,7 @@ def extract_contact_phone_from_message(raw_msg: dict) -> str:
     - Standard WhatsApp JIDs (@s.whatsapp.net)
     - Multi-device JIDs (:0@s.whatsapp.net)
     - WhatsApp Privacy LIDs (@lid) via remoteJidAlt or participantAlt
+    - Group participants (@g.us via participant / participantAlt)
     - Direct number fields
     """
     if not isinstance(raw_msg, dict):
@@ -78,6 +79,8 @@ def extract_contact_phone_from_message(raw_msg: dict) -> str:
         raw_msg.get("participantAlt"),
         key.get("remoteJid"),
         raw_msg.get("remoteJid"),
+        key.get("participant"),
+        raw_msg.get("participant"),
         raw_msg.get("chatId"),
         raw_msg.get("from"),
         raw_msg.get("to"),
@@ -85,24 +88,24 @@ def extract_contact_phone_from_message(raw_msg: dict) -> str:
         raw_msg.get("receiver"),
     ]
 
-    # Priority 1: Pick non-lid, non-group standard WhatsApp strings
+    # Priority 1: Pick non-lid, non-broadcast standard WhatsApp strings
     for c in candidates:
         if not c:
             continue
         c_str = str(c)
-        if any(x in c_str for x in ("@g.us", "@broadcast", "@newsletter", "@lid")):
+        if any(x in c_str for x in ("@broadcast", "@newsletter", "@lid")):
             continue
         user_part = c_str.split("@")[0].split(":")[0]
         digits = re.sub(r"\D", "", user_part)
         if len(digits) >= 10:
             return digits
 
-    # Priority 2: Fallback to any digits in candidates (ignoring groups/broadcasts)
+    # Priority 2: Fallback to any digits in candidates (ignoring broadcasts/newsletters)
     for c in candidates:
         if not c:
             continue
         c_str = str(c)
-        if "@g.us" in c_str or "@broadcast" in c_str or "@newsletter" in c_str:
+        if "@broadcast" in c_str or "@newsletter" in c_str:
             continue
         user_part = c_str.split("@")[0].split(":")[0]
         digits = re.sub(r"\D", "", user_part)
@@ -417,9 +420,9 @@ class EvolutionAPIClient:
 
             key = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
 
-            # Exclude groups, broadcasts, newsletters
+            # Exclude broadcasts and newsletters
             for raw_jid in [key.get("remoteJid"), m.get("remoteJid"), m.get("chatId")]:
-                if raw_jid and any(x in str(raw_jid) for x in ("@g.us", "@broadcast", "@newsletter")):
+                if raw_jid and any(x in str(raw_jid) for x in ("@broadcast", "@newsletter")):
                     return False
 
             msg_phone = extract_contact_phone_from_message(m)
@@ -429,7 +432,7 @@ class EvolutionAPIClient:
                 if len(suffix10) >= 10 and (msg_phone.endswith(suffix10) or suffix10 in msg_phone):
                     return True
 
-            for jid_val in [key.get("remoteJidAlt"), key.get("remoteJid"), key.get("participantAlt"), m.get("remoteJid")]:
+            for jid_val in [key.get("remoteJidAlt"), key.get("remoteJid"), key.get("participantAlt"), key.get("participant"), m.get("remoteJid")]:
                 if jid_val:
                     j_str = str(jid_val)
                     if j_str in candidate_jids:
