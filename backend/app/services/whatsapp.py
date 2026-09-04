@@ -134,38 +134,69 @@ class EvolutionAPIClient:
         phone_or_jid: str,
         count: int = 50,
     ) -> list[dict]:
-        """Fetch historical messages from Evolution API for a specific contact.
+        """Fetch historical messages from Evolution API for a specific contact chat.
 
-        Directly queries the Evolution API using candidate JIDs and multiple fallback strategies
-        to reliably return the contact's messages.
+        Queries Evolution API for the specific contact's remoteJid.
+        Filters strictly so ONLY messages belonging to this contact are returned.
         """
         import re
 
         raw_phone = phone_or_jid.split("@")[0].split(":")[0] if "@" in phone_or_jid else phone_or_jid
         digits = re.sub(r"\D", "", str(raw_phone or ""))
-        suffix10 = digits[-10:] if len(digits) >= 10 else digits
+        if not digits:
+            return []
 
+        suffix10 = digits[-10:] if len(digits) >= 10 else digits
+        clean_12 = f"91{suffix10}" if len(suffix10) == 10 else digits
+
+        # Construct candidate JIDs for this contact
         candidate_jids = []
-        if "@" in phone_or_jid:
+        if "@s.whatsapp.net" in phone_or_jid or "@lid" in phone_or_jid:
             candidate_jids.append(phone_or_jid)
-        if digits:
-            candidate_jids.append(f"{digits}@s.whatsapp.net")
         if len(digits) == 10:
             candidate_jids.append(f"91{digits}@s.whatsapp.net")
+            candidate_jids.append(f"{digits}@s.whatsapp.net")
         elif len(digits) == 11 and digits.startswith("0"):
             candidate_jids.append(f"91{digits[1:]}@s.whatsapp.net")
             candidate_jids.append(f"{digits[1:]}@s.whatsapp.net")
         elif len(digits) == 12 and digits.startswith("91"):
+            candidate_jids.append(f"{digits}@s.whatsapp.net")
             candidate_jids.append(f"{digits[2:]}@s.whatsapp.net")
+        else:
+            candidate_jids.append(f"{digits}@s.whatsapp.net")
 
-        seen_jids = set()
-        unique_jids = []
+        seen = set()
+        target_jids = []
         for j in candidate_jids:
-            if j and j not in seen_jids:
-                seen_jids.add(j)
-                unique_jids.append(j)
+            if j not in seen:
+                seen.add(j)
+                target_jids.append(j)
 
-        def _parse(data):
+        def _is_chat_message(m: dict) -> bool:
+            """Check if a message object belongs strictly to this contact."""
+            if not isinstance(m, dict):
+                return False
+            key = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
+            jid = str(key.get("remoteJid") or m.get("remoteJid") or "")
+            # Exclude groups, status broadcasts, newsletters
+            if not jid or "@g.us" in jid or "@broadcast" in jid or "@newsletter" in jid:
+                return False
+            
+            # Check exact JID match
+            if jid in target_jids:
+                return True
+            
+            # Check phone digits match
+            jid_phone = re.sub(r"\D", "", jid.split("@")[0].split(":")[0])
+            if not jid_phone:
+                return False
+            if jid_phone == clean_12 or jid_phone == digits:
+                return True
+            if len(suffix10) == 10 and jid_phone.endswith(suffix10):
+                return True
+            return False
+
+        def _parse_records(data) -> list[dict]:
             if isinstance(data, list):
                 return [d for d in data if isinstance(d, dict)]
             if isinstance(data, dict):
@@ -182,9 +213,9 @@ class EvolutionAPIClient:
                         return [d for d in rec if isinstance(d, dict)]
             return []
 
-        async with httpx.AsyncClient(timeout=10) as client:
-            # 1. Direct query with candidate JIDs
-            for jid in unique_jids:
+        async with httpx.AsyncClient(timeout=12) as client:
+            # Strategy 1: Direct findMessages with targeted where queries
+            for jid in target_jids:
                 for payload in [
                     {"where": {"remoteJid": jid}, "limit": count},
                     {"where": {"key": {"remoteJid": jid}}, "limit": count},
@@ -197,35 +228,30 @@ class EvolutionAPIClient:
                             json=payload,
                         )
                         if resp.status_code == 200:
-                            recs = _parse(resp.json())
-                            if recs:
-                                return recs[:count]
+                            recs = _parse_records(resp.json())
+                            filtered = [r for r in recs if _is_chat_message(r)]
+                            if filtered:
+                                return filtered[:count]
                     except Exception as e:
-                        logger.debug("findMessages failed for %s: %s", jid, e)
+                        logger.debug("findMessages payload failed for %s: %s", jid, e)
 
-            # 2. In-memory filtered fallback from recent messages
+            # Strategy 2: Query findMessages with limit and filter strictly by this contact
             try:
                 for fallback_payload in [{"limit": 100}, {}]:
-                    f_resp = await client.post(
+                    resp = await client.post(
                         self._url(f"/chat/findMessages/{instance_name}"),
                         headers=self.headers,
                         json=fallback_payload,
                     )
-                    if f_resp.status_code == 200:
-                        all_recs = _parse(f_resp.json())
-                        matching = []
-                        for rec in all_recs:
-                            key = rec.get("key", {}) if isinstance(rec.get("key"), dict) else {}
-                            rec_jid = str(key.get("remoteJid") or rec.get("remoteJid") or key.get("participant") or rec.get("participant") or "")
-                            rec_digits = re.sub(r"\D", "", rec_jid.split("@")[0].split(":")[0])
-                            if suffix10 and suffix10 in rec_digits:
-                                matching.append(rec)
-                        if matching:
-                            return matching[:count]
+                    if resp.status_code == 200:
+                        recs = _parse_records(resp.json())
+                        filtered = [r for r in recs if _is_chat_message(r)]
+                        if filtered:
+                            return filtered[:count]
             except Exception as e:
-                logger.debug("fallback findMessages failed: %s", e)
+                logger.debug("findMessages fallback failed: %s", e)
 
-            # 3. Check findChats for @lid format or alternate JID
+            # Strategy 3: Check findChats for this specific contact
             try:
                 c_resp = await client.post(
                     self._url(f"/chat/findChats/{instance_name}"),
@@ -238,11 +264,11 @@ class EvolutionAPIClient:
                         headers=self.headers,
                     )
                 if c_resp.status_code == 200:
-                    chats = _parse(c_resp.json())
+                    chats = _parse_records(c_resp.json())
                     for ch in chats:
                         ch_jid = str(ch.get("remoteJid") or ch.get("id") or ch.get("jid") or "")
                         ch_phone = re.sub(r"\D", "", ch_jid.split("@")[0].split(":")[0])
-                        if suffix10 and suffix10 in ch_phone:
+                        if (suffix10 and suffix10 in ch_phone) or ch_jid in target_jids:
                             for p in [
                                 {"where": {"remoteJid": ch_jid}, "limit": count},
                                 {"where": {"key": {"remoteJid": ch_jid}}, "limit": count},
@@ -253,11 +279,13 @@ class EvolutionAPIClient:
                                     json=p,
                                 )
                                 if m_resp.status_code == 200:
-                                    recs = _parse(m_resp.json())
-                                    if recs:
-                                        return recs[:count]
+                                    recs = _parse_records(m_resp.json())
+                                    filtered = [r for r in recs if _is_chat_message(r)]
+                                    if filtered:
+                                        return filtered[:count]
                             if ch.get("lastMessage") and isinstance(ch["lastMessage"], dict):
-                                return [ch["lastMessage"]]
+                                if _is_chat_message(ch["lastMessage"]):
+                                    return [ch["lastMessage"]]
             except Exception as e:
                 logger.debug("findChats lookup failed: %s", e)
 
@@ -509,6 +537,15 @@ async def process_incoming_message(
             )
             db.add(notif)
 
+    if lead_id:
+        from sqlalchemy import delete
+        await db.execute(
+            delete(WhatsAppMessage).where(
+                WhatsAppMessage.lead_id == lead_id,
+                WhatsAppMessage.content == "[Chat Initialised - No previous history found]",
+            )
+        )
+
     await db.commit()
     await db.refresh(msg)
     return msg
@@ -553,6 +590,14 @@ async def save_outbound_message(
         },
     )
     db.add(timeline_entry)
+
+    from sqlalchemy import delete
+    await db.execute(
+        delete(WhatsAppMessage).where(
+            WhatsAppMessage.lead_id == lead_id,
+            WhatsAppMessage.content == "[Chat Initialised - No previous history found]",
+        )
+    )
 
     await db.commit()
     await db.refresh(msg)

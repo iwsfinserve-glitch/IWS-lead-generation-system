@@ -518,24 +518,39 @@ async def sync_chat_history(
 
     imported = 0
 
-    # Step A: Link any unlinked or misassigned messages already stored in local DB
-    if suffix10:
-        unlinked_res = await db.execute(
+    # Step A: Clean up any corrupted messages erroneously assigned to this lead from other contacts
+    if len(suffix10) == 10:
+        corrupted_res = await db.execute(
             select(WhatsAppMessage).where(
+                WhatsAppMessage.lead_id == lead_id,
+                ~WhatsAppMessage.sender_phone.like(f"%{suffix10}%"),
+                ~WhatsAppMessage.receiver_phone.like(f"%{suffix10}%"),
+                WhatsAppMessage.content != "[Chat Initialised - No previous history found]",
+            )
+        )
+        for bad_msg in corrupted_res.scalars().all():
+            real_phone = bad_msg.sender_phone if bad_msg.direction == MessageDirection.inbound else bad_msg.receiver_phone
+            real_lead = await match_lead_by_phone(db, real_phone)
+            bad_msg.lead_id = real_lead.id if real_lead else None
+
+    # Step B: Link only unlinked orphan messages (where lead_id IS NULL)
+    if len(suffix10) == 10:
+        orphan_res = await db.execute(
+            select(WhatsAppMessage).where(
+                WhatsAppMessage.lead_id.is_(None),
                 or_(
                     WhatsAppMessage.sender_phone.like(f"%{suffix10}%"),
                     WhatsAppMessage.receiver_phone.like(f"%{suffix10}%"),
-                )
+                ),
             )
         )
-        for unlinked in unlinked_res.scalars().all():
-            if unlinked.lead_id != lead_id or unlinked.instance_name != instance_name:
-                unlinked.lead_id = lead_id
-                unlinked.user_id = lead.assigned_rep_id or current_user.id
-                unlinked.instance_name = instance_name
-                imported += 1
+        for orphan in orphan_res.scalars().all():
+            orphan.lead_id = lead_id
+            orphan.user_id = lead.assigned_rep_id or current_user.id
+            orphan.instance_name = instance_name
+            imported += 1
 
-    # Step B: Fetch historical messages from Evolution API (up to 50)
+    # Step C: Fetch historical messages from Evolution API (up to 50)
     raw_messages = []
     try:
         raw_messages = await evo_client.fetch_messages(instance_name, clean_phone, count=50)
@@ -570,11 +585,14 @@ async def sync_chat_history(
             )
             existing = existing_res.scalar_one_or_none()
             if existing:
-                if existing.lead_id != lead_id or existing.instance_name != instance_name:
+                if existing.lead_id is None:
                     existing.lead_id = lead_id
                     existing.user_id = lead.assigned_rep_id or current_user.id
                     existing.instance_name = instance_name
                     imported += 1
+                elif existing.lead_id == lead_id:
+                    if not existing.content and content:
+                        existing.content = content
                 continue
 
         direction = MessageDirection.outbound if from_me else MessageDirection.inbound
