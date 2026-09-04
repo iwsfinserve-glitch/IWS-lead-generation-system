@@ -603,15 +603,17 @@ async def sync_chat_history(
                 unlinked.instance_name = instance_name
                 imported += 1
 
-    # Step B: Fetch historical messages from Evolution API using fast multi-tier fallback
-    raw_messages = []
+    # Step B: Fetch up to 100 historical messages from Evolution API using multi-strategy fallback
     try:
         raw_messages = await evo_client.fetch_messages(
-            instance_name, remote_jid, lead_name=lead.name, count=50
+            instance_name, remote_jid, lead_name=lead.name, count=100
         )
     except Exception as exc:
-        logger.warning("Failed to fetch history from Evolution API: %s", exc)
-        raw_messages = []
+        logger.exception("Failed to fetch history from Evolution API: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Could not fetch history from WhatsApp. Make sure your WhatsApp is still connected.",
+        )
 
     for raw in raw_messages:
         if not isinstance(raw, dict):
