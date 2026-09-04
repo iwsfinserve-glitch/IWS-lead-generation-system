@@ -538,7 +538,7 @@ async def sync_chat_history(
         from_me = bool(key.get("fromMe") if "fromMe" in key else raw.get("fromMe", False))
 
         # Skip group messages, broadcasts, newsletters
-        jid = str(key.get("remoteJid") or raw.get("remoteJid", ""))
+        jid = str(key.get("remoteJid") or raw.get("remoteJid") or raw.get("chatId") or raw.get("from") or raw.get("to") or "")
         if "@g.us" in jid or "@broadcast" in jid or "@newsletter" in jid:
             continue
 
