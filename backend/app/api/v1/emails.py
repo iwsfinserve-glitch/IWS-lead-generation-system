@@ -28,7 +28,8 @@ async def send_email(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not current_user.email:
+    user_email = current_user.email or current_user.username
+    if not user_email:
         raise HTTPException(
             status_code=400,
             detail="Your account must have an email address set up for sending emails."
@@ -54,7 +55,7 @@ async def send_email(
     message = EmailMessage()
     message.set_content(payload.body)
     message["To"] = lead.email
-    message["From"] = current_user.email
+    message["From"] = user_email
     message["Subject"] = payload.subject
 
     # encoded message

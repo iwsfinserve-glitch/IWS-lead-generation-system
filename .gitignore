@@ -1,5 +1,4 @@
 .venv
-.gitignore
 __pycache__
 implementation_plan.md
 architecture_report.md
@@ -18,12 +17,11 @@ backend/seed_backup.json
 .env
 cleanup.py
 .pytest_cache/
-/*.md
 Project_Cost_Estimate_Lead_Management.xlsx
 Project_Cost_Estimate_Empirical.xlsx
 /PROJECT_ARCHITECTURE_AND_FEATURES.md
 /dynamic_config_implementation_plan.md
-
+docs/
 # ==========================================
 # Environment variables and secrets
 # ==========================================
