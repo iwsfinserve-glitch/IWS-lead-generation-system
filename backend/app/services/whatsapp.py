@@ -479,8 +479,12 @@ async def process_incoming_message(
 
     lead_phone = receiver_phone if is_from_me else sender_phone
     lead = await match_lead_by_phone(db, lead_phone, assigned_rep_id=rep_id)
-    lead_id = lead.id if lead else None
-    user_id = lead.assigned_rep_id if lead else None
+    if not lead:
+        logger.debug("WhatsApp message from/to %s is not a CRM lead. Ignored.", lead_phone)
+        return None
+
+    lead_id = lead.id
+    user_id = lead.assigned_rep_id
 
     # 2. Dedup — skip if we already stored this message
     if whatsapp_msg_id:
@@ -508,43 +512,42 @@ async def process_incoming_message(
     )
     db.add(msg)
 
-    # 4. Log to LeadTimeline and create in-app Notification (only if matched to a lead)
-    if lead_id and user_id:
-        preview = (content or "")[:200]
-        timeline_entry = LeadTimeline(
-            lead_id=lead_id,
+    # 4. Log to LeadTimeline and create in-app Notification
+    preview = (content or "")[:200]
+    timeline_entry = LeadTimeline(
+        lead_id=lead_id,
+        user_id=user_id,
+        event_type="whatsapp_message",
+        event_metadata={
+            "direction": "inbound" if not is_from_me else "outbound",
+            "sender_phone": sender_phone,
+            "content_preview": preview,
+            "media_type": media_type,
+        },
+    )
+    db.add(timeline_entry)
+
+    # Only notify if it's an inbound message
+    if not is_from_me and user_id:
+        lead_display = lead.name or sender_phone
+        notif = Notification(
             user_id=user_id,
-            event_type="whatsapp_message",
-            event_metadata={
-                "direction": "inbound",
-                "sender_phone": sender_phone,
-                "content_preview": preview,
-                "media_type": media_type,
-            },
+            title=f"WhatsApp from {lead_display}",
+            message=f"{preview or '[Media]'}",
+            notification_type="whatsapp_message",
+            link_type="lead",
+            link_id=lead_id,
         )
-        db.add(timeline_entry)
+        db.add(notif)
 
-        # Only notify if it's an inbound message
-        if not is_from_me:
-            lead_display = lead.name or sender_phone
-            notif = Notification(
-                user_id=user_id,
-                title=f"WhatsApp from {lead_display}",
-                message=f"{preview or '[Media]'}",
-                notification_type="whatsapp_message",
-                link_type="lead",
-                link_id=lead_id,
-            )
-            db.add(notif)
-
-    if lead_id:
-        from sqlalchemy import delete
-        await db.execute(
-            delete(WhatsAppMessage).where(
-                WhatsAppMessage.lead_id == lead_id,
-                WhatsAppMessage.content == "[Chat Initialised - No previous history found]",
-            )
+    # Clean up any initialization placeholder message for this lead
+    from sqlalchemy import delete
+    await db.execute(
+        delete(WhatsAppMessage).where(
+            WhatsAppMessage.lead_id == lead_id,
+            WhatsAppMessage.content == "[Chat Initialised - No previous history found]",
         )
+    )
 
     await db.commit()
     await db.refresh(msg)
