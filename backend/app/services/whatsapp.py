@@ -60,9 +60,6 @@ class EvolutionAPIClient:
                     "instanceName": instance_name,
                     "qrcode": True,
                     "integration": "WHATSAPP-BAILEYS",
-                    "syncFullHistory": True,
-                    "groupsIgnore": True,
-                    "alwaysOnline": True,
                 },
             )
             resp.raise_for_status()
@@ -96,8 +93,8 @@ class EvolutionAPIClient:
             phone: Recipient phone in international format (e.g. '919876543210').
             text: Message text content.
         """
-        # Normalise phone
-        clean_phone = _normalise_phone_for_wa(phone)
+        # Normalise phone: strip +, spaces, dashes
+        clean_phone = phone.replace("+", "").replace(" ", "").replace("-", "")
 
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
@@ -134,176 +131,41 @@ class EvolutionAPIClient:
     async def fetch_messages(
         self,
         instance_name: str,
-        phone_or_jid: str,
+        remote_jid: str,
         count: int = 50,
     ) -> list[dict]:
-        """Fetch historical messages from Evolution API for a specific chat or contact.
+        """Fetch historical messages from Evolution API for a specific chat.
 
-        Uses multiple fallback strategies to guarantee compatibility across
-        different Evolution API versions, database backends (TypeORM / Postgres vs MongoDB),
-        and WhatsApp JID variations (with/without country code, @lid, etc.):
-        1. Targeted findMessages with candidate JIDs and query shapes (nested vs flat where).
-        2. Lookup contact in findChats to discover their exact Evolution API JID/LID.
-        3. Fetch recent instance messages and apply client-side filtering.
-        4. Fallback to lastMessage from findChats.
+        Args:
+            instance_name: The Evolution API session name.
+            remote_jid: The WhatsApp JID of the contact (e.g. '919876543210@s.whatsapp.net').
+            count: Max number of messages to fetch (default 50).
         """
-        raw_phone = phone_or_jid.split("@")[0] if "@" in phone_or_jid else phone_or_jid
-        clean_phone = _normalise_phone_for_wa(raw_phone)
-        digits = _extract_digits(raw_phone)
-        suffix10 = digits[-10:] if len(digits) >= 10 else digits
-
-        candidate_jids = []
-        if "@" in phone_or_jid:
-            candidate_jids.append(phone_or_jid)
-        if clean_phone:
-            candidate_jids.append(f"{clean_phone}@s.whatsapp.net")
-        if suffix10 and suffix10 != clean_phone:
-            candidate_jids.append(f"{suffix10}@s.whatsapp.net")
-
-        # Deduplicate preserving order
-        seen_jids = set()
-        unique_candidate_jids = []
-        for j in candidate_jids:
-            if j not in seen_jids:
-                seen_jids.add(j)
-                unique_candidate_jids.append(j)
-
-        def _parse_records(data) -> list[dict]:
-            if isinstance(data, list):
-                return [item for item in data if isinstance(item, dict)]
-            if isinstance(data, dict):
-                msgs = data.get("messages")
-                if isinstance(msgs, dict):
-                    records = msgs.get("records") or msgs.get("rows") or msgs.get("data")
-                    if isinstance(records, list):
-                        return [item for item in records if isinstance(item, dict)]
-                elif isinstance(msgs, list):
-                    return [item for item in msgs if isinstance(item, dict)]
-                for key in ["records", "data", "rows", "items", "result"]:
-                    val = data.get(key)
-                    if isinstance(val, list):
-                        return [item for item in val if isinstance(item, dict)]
-            return []
-
         async with httpx.AsyncClient(timeout=30) as client:
-            # ── Strategy 1: Targeted findMessages with candidate JIDs & query shapes ──
-            for c_jid in unique_candidate_jids:
-                payloads = [
-                    {"where": {"key": {"remoteJid": c_jid}}, "limit": count},
-                    {"where": {"remoteJid": c_jid}, "limit": count},
-                    {"where": {"key.remoteJid": c_jid}, "limit": count},
-                ]
-                for p in payloads:
-                    try:
-                        resp = await client.post(
-                            self._url(f"/chat/findMessages/{instance_name}"),
-                            headers=self.headers,
-                            json=p,
-                        )
-                        if resp.status_code == 200:
-                            records = _parse_records(resp.json())
-                            if records:
-                                logger.info(
-                                    "fetch_messages: Found %d messages for %s using payload %s",
-                                    len(records), c_jid, list(p["where"].keys())[0]
-                                )
-                                return records
-                    except Exception as e:
-                        logger.debug("Strategy 1 query failed for %s (%s): %s", c_jid, p, e)
-
-            # ── Strategy 2: Check findChats to discover actual chat remoteJid / LID ──
-            discovered_jid = None
-            last_msg_fallback = None
-            try:
-                c_resp = await client.post(
-                    self._url(f"/chat/findChats/{instance_name}"),
-                    headers=self.headers,
-                    json={},
+            resp = await client.post(
+                self._url(f"/chat/findMessages/{instance_name}"),
+                headers=self.headers,
+                json={
+                    "where": {
+                        "key": {"remoteJid": remote_jid},
+                    },
+                    "limit": count,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            # Evolution API wraps messages in {"messages": {"records": [...]}}
+            if isinstance(data, dict):
+                records = (
+                    data.get("messages", {}).get("records")
+                    or data.get("records")
+                    or data.get("messages")
+                    or []
                 )
-                if c_resp.status_code >= 400:
-                    c_resp = await client.get(
-                        self._url(f"/chat/findChats/{instance_name}"),
-                        headers=self.headers,
-                    )
-                if c_resp.status_code == 200:
-                    chats = _parse_records(c_resp.json())
-                    for ch in chats:
-                        if not isinstance(ch, dict):
-                            continue
-                        ch_jid = ch.get("remoteJid") or ch.get("id") or ch.get("jid") or ""
-                        ch_digits = _extract_digits(str(ch_jid).split("@")[0])
-                        ch_phone = _extract_digits(ch.get("phone") or ch.get("phoneNumber") or "")
-
-                        if (suffix10 and (suffix10 in ch_digits or suffix10 in ch_phone)) or (clean_phone and clean_phone in ch_digits):
-                            discovered_jid = ch_jid
-                            if ch.get("lastMessage"):
-                                last_msg_fallback = ch["lastMessage"]
-                            break
-
-                if discovered_jid and discovered_jid not in seen_jids:
-                    for p in [
-                        {"where": {"key": {"remoteJid": discovered_jid}}, "limit": count},
-                        {"where": {"remoteJid": discovered_jid}, "limit": count},
-                    ]:
-                        try:
-                            resp = await client.post(
-                                self._url(f"/chat/findMessages/{instance_name}"),
-                                headers=self.headers,
-                                json=p,
-                            )
-                            if resp.status_code == 200:
-                                records = _parse_records(resp.json())
-                                if records:
-                                    logger.info(
-                                        "fetch_messages: Found %d messages for discovered JID %s",
-                                        len(records), discovered_jid
-                                    )
-                                    return records
-                        except Exception as e:
-                            logger.debug("Strategy 2 query failed for %s: %s", discovered_jid, e)
-            except Exception as e:
-                logger.debug("Strategy 2 findChats failed: %s", e)
-
-            # ── Strategy 3: Client-side filtering of recent messages ──
-            try:
-                resp = await client.post(
-                    self._url(f"/chat/findMessages/{instance_name}"),
-                    headers=self.headers,
-                    json={"limit": 100},
-                )
-                if resp.status_code == 200:
-                    all_records = _parse_records(resp.json())
-                    filtered = []
-                    for r in all_records:
-                        if not isinstance(r, dict):
-                            continue
-                        r_key = r.get("key", {}) if isinstance(r.get("key"), dict) else {}
-                        r_jid = r_key.get("remoteJid") or r.get("remoteJid") or ""
-                        r_part = r_key.get("participant") or r.get("participant") or ""
-                        r_digits = _extract_digits(str(r_jid).split("@")[0])
-                        r_part_digits = _extract_digits(str(r_part).split("@")[0])
-
-                        if suffix10 and (suffix10 in r_digits or suffix10 in r_part_digits):
-                            filtered.append(r)
-                        elif clean_phone and (clean_phone in r_digits or clean_phone in r_part_digits):
-                            filtered.append(r)
-                        elif discovered_jid and (discovered_jid == r_jid or discovered_jid == r_part):
-                            filtered.append(r)
-
-                    if filtered:
-                        logger.info(
-                            "fetch_messages: Client-side filter found %d messages for suffix %s",
-                            len(filtered), suffix10
-                        )
-                        return filtered
-            except Exception as e:
-                logger.debug("Strategy 3 client-side filter failed: %s", e)
-
-            # ── Strategy 4: Fallback to lastMessage from findChats ──
-            if last_msg_fallback and isinstance(last_msg_fallback, dict):
-                logger.info("fetch_messages: Falling back to lastMessage from findChats for %s", suffix10)
-                return [last_msg_fallback]
-
+                if isinstance(records, list):
+                    return records
+            if isinstance(data, list):
+                return data
             return []
 
 
@@ -315,82 +177,44 @@ evo_client = EvolutionAPIClient()
 # Message Processing
 # ═══════════════════════════════════════════════════════════════════════
 
-def _extract_digits(phone: str) -> str:
-    """Extract only digit characters from a string."""
-    if not phone:
-        return ""
-    import re
-    return re.sub(r"\D", "", str(phone))
-
-
 def _normalise_phone(phone: str) -> str:
-    """Strip non-digits from a phone number for comparison."""
-    return _extract_digits(phone)
-
+    """Strip +, spaces, dashes from a phone number for comparison."""
+    if not phone: return ""
+    return phone.replace("+", "").replace(" ", "").replace("-", "").strip()
 
 def _normalise_phone_for_wa(phone: str) -> str:
-    """Normalize phone to international format without + (default 91 for Indian numbers)."""
-    digits = _extract_digits(phone)
-    if not digits:
-        return ""
-    # 11 digits starting with 0 (e.g. 09876543210 -> 919876543210)
-    if len(digits) == 11 and digits.startswith("0"):
-        return f"91{digits[1:]}"
-    # 10 digits Indian mobile number
-    if len(digits) == 10:
-        return f"91{digits}"
-    # 12 digits starting with 91
-    if len(digits) == 12 and digits.startswith("91"):
-        return digits
-    # Starting with 00 (e.g. 0091...)
-    if digits.startswith("00"):
-        digits = digits[2:]
-    return digits
-
+    """Strip chars, and if it's exactly 10 digits, prepend '91'."""
+    clean = _normalise_phone(phone)
+    if len(clean) == 10 and clean.isdigit():
+        return f"91{clean}"
+    return clean
 
 async def match_lead_by_phone(db: AsyncSession, phone: str, assigned_rep_id: int | None = None) -> Lead | None:
     """Find a lead whose phone_number matches the given WhatsApp phone.
-    Automatically handles cases where the CRM lead has formatted numbers,
-    parentheses, leading 0, or 10-digit number with 91 WhatsApp country code.
+    Automatically handles cases where the CRM lead has a 10-digit number
+    but WhatsApp sends it with the 91 country code.
     """
     from sqlalchemy import or_
-
-    digits = _extract_digits(phone)
-    if not digits:
-        return None
-
+    
     clean_wa = _normalise_phone_for_wa(phone)
-    suffix10 = digits[-10:] if len(digits) >= 10 else digits
-
-    # Clean Lead.phone_number in SQL: strip +, space, -, (, )
-    clean_lead = func.replace(
-        func.replace(
-            func.replace(
-                func.replace(
-                    func.replace(Lead.phone_number, "+", ""),
-                    " ", ""
-                ),
-                "-", ""
-            ),
-            "(", ""
-        ),
-        ")", ""
+    if not clean_wa:
+        return None
+        
+    clean_lead = func.replace(func.replace(func.replace(Lead.phone_number, "+", ""), " ", ""), "-", "")
+    
+    query = select(Lead).where(
+        or_(
+            clean_lead == clean_wa,
+            func.concat("91", clean_lead) == clean_wa,
+            clean_lead == _normalise_phone(phone)
+        )
     )
-
-    conditions = [
-        clean_lead == clean_wa,
-        clean_lead == digits,
-        func.concat("91", clean_lead) == clean_wa,
-    ]
-    if len(suffix10) == 10:
-        conditions.append(func.right(clean_lead, 10) == suffix10)
-
-    query = select(Lead).where(or_(*conditions))
-
+    
     if assigned_rep_id is not None:
         query = query.where(Lead.assigned_rep_id == assigned_rep_id)
-
+        
     result = await db.execute(query)
+    # Use first() instead of scalar_one_or_none() to prevent webhook crashes if multiple leads have same phone
     return result.scalars().first()
 
 
