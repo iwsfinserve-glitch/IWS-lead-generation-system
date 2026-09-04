@@ -78,17 +78,19 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
     messages = data if isinstance(data, list) else [data]
 
     for msg_data in messages:
-        key = msg_data.get("key", {})
+        if not isinstance(msg_data, dict):
+            continue
+        key = msg_data.get("key", {}) if isinstance(msg_data.get("key"), dict) else {}
 
-        is_from_me = key.get("fromMe", False)
+        is_from_me = key.get("fromMe") if "fromMe" in key else msg_data.get("fromMe", False)
 
-        remote_jid = key.get("remoteJid", "")
+        remote_jid = key.get("remoteJid") or msg_data.get("remoteJid", "")
         # Only process individual chats (not groups)
-        if not remote_jid or "@g.us" in remote_jid:
+        if not remote_jid or "@g.us" in str(remote_jid):
             continue
 
         # Extract phone from JID: "919876543210@s.whatsapp.net" → "919876543210"
-        contact_phone = remote_jid.split("@")[0]
+        contact_phone = str(remote_jid).split("@")[0]
 
         # Determine sender and receiver
         if is_from_me:
@@ -100,9 +102,20 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
 
         # Extract message content
         message_obj = msg_data.get("message", {})
+        if isinstance(message_obj, str):
+            try:
+                import json
+                message_obj = json.loads(message_obj)
+            except Exception:
+                message_obj = {"conversation": message_obj}
+        elif not isinstance(message_obj, dict):
+            message_obj = {}
+
         content = (
             message_obj.get("conversation")
             or message_obj.get("extendedTextMessage", {}).get("text")
+            or msg_data.get("body")
+            or msg_data.get("content")
             or ""
         )
 
@@ -122,12 +135,18 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
             media_type = "document"
             content = content or message_obj.get("documentMessage", {}).get("fileName", "[Document]")
 
-        whatsapp_msg_id = key.get("id")
-        msg_timestamp = msg_data.get("messageTimestamp")
+        whatsapp_msg_id = key.get("id") or msg_data.get("id")
+        msg_timestamp = msg_data.get("messageTimestamp") or msg_data.get("timestamp")
         ts = None
         if msg_timestamp:
             try:
-                ts = datetime.fromtimestamp(int(msg_timestamp), tz=timezone.utc)
+                if isinstance(msg_timestamp, (int, float)):
+                    ts = datetime.fromtimestamp(int(msg_timestamp), tz=timezone.utc)
+                elif isinstance(msg_timestamp, str):
+                    if msg_timestamp.isdigit():
+                        ts = datetime.fromtimestamp(int(msg_timestamp), tz=timezone.utc)
+                    else:
+                        ts = datetime.fromisoformat(msg_timestamp.replace("Z", "+00:00"))
             except (ValueError, TypeError):
                 ts = None
 
@@ -138,7 +157,7 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
                 sender_phone=sender_phone,
                 receiver_phone=receiver_phone,
                 content=content if content else None,
-                whatsapp_msg_id=whatsapp_msg_id,
+                whatsapp_msg_id=str(whatsapp_msg_id) if whatsapp_msg_id else None,
                 media_type=media_type,
                 media_url=media_url,
                 timestamp=ts,
@@ -529,6 +548,9 @@ async def sync_chat_history(
     this lead's phone number, deduplicates, and saves all new messages.
     Returns a count of newly imported messages.
     """
+    import json
+    from sqlalchemy import delete
+
     lead = await db.get(Lead, lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -541,11 +563,10 @@ async def sync_chat_history(
     instance_name = f"rep_{current_user.id}"
 
     # Build the WhatsApp JID for this lead's phone number
-    # Auto-handle 10-digit numbers by prepending 91
     clean_phone = _normalise_phone_for_wa(lead.phone_number)
     remote_jid = f"{clean_phone}@s.whatsapp.net"
 
-    # Fetch up to 50 historical messages from Evolution API
+    # Fetch up to 50 historical messages from Evolution API using multi-strategy fallback
     try:
         raw_messages = await evo_client.fetch_messages(instance_name, remote_jid, count=50)
     except Exception as exc:
@@ -557,28 +578,41 @@ async def sync_chat_history(
 
     imported = 0
     for raw in raw_messages:
-        key = raw.get("key", {})
-        wa_msg_id = key.get("id")
-        from_me = key.get("fromMe", False)
+        if not isinstance(raw, dict):
+            continue
+
+        key = raw.get("key", {}) if isinstance(raw.get("key"), dict) else {}
+        wa_msg_id = key.get("id") or raw.get("id") or raw.get("whatsapp_msg_id")
+        from_me = key.get("fromMe") if "fromMe" in key else raw.get("fromMe", False)
 
         # Skip group messages
-        jid = key.get("remoteJid", "")
-        if "@g.us" in jid:
+        jid = key.get("remoteJid") or raw.get("remoteJid", "")
+        if "@g.us" in str(jid):
             continue
 
         # Dedup by whatsapp_msg_id
         if wa_msg_id:
             existing = await db.execute(
-                select(WhatsAppMessage).where(WhatsAppMessage.whatsapp_msg_id == wa_msg_id)
+                select(WhatsAppMessage).where(WhatsAppMessage.whatsapp_msg_id == str(wa_msg_id))
             )
             if existing.scalar_one_or_none():
                 continue
 
         # Extract content
         message_obj = raw.get("message", {})
+        if isinstance(message_obj, str):
+            try:
+                message_obj = json.loads(message_obj)
+            except Exception:
+                message_obj = {"conversation": message_obj}
+        elif not isinstance(message_obj, dict):
+            message_obj = {}
+
         content = (
             message_obj.get("conversation")
             or message_obj.get("extendedTextMessage", {}).get("text")
+            or raw.get("body")
+            or raw.get("content")
             or ""
         )
         media_type = None
@@ -597,10 +631,16 @@ async def sync_chat_history(
 
         # Parse timestamp
         ts = None
-        raw_ts = raw.get("messageTimestamp")
+        raw_ts = raw.get("messageTimestamp") or raw.get("timestamp") or raw.get("createdAt")
         if raw_ts:
             try:
-                ts = datetime.fromtimestamp(int(raw_ts), tz=timezone.utc)
+                if isinstance(raw_ts, (int, float)):
+                    ts = datetime.fromtimestamp(int(raw_ts), tz=timezone.utc)
+                elif isinstance(raw_ts, str):
+                    if raw_ts.isdigit():
+                        ts = datetime.fromtimestamp(int(raw_ts), tz=timezone.utc)
+                    else:
+                        ts = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
             except (ValueError, TypeError):
                 ts = None
 
@@ -611,7 +651,7 @@ async def sync_chat_history(
         msg = WhatsAppMessage(
             lead_id=lead_id,
             user_id=lead.assigned_rep_id,
-            whatsapp_msg_id=wa_msg_id,
+            whatsapp_msg_id=str(wa_msg_id) if wa_msg_id else None,
             instance_name=instance_name,
             sender_phone=sender,
             receiver_phone=receiver,
@@ -624,7 +664,17 @@ async def sync_chat_history(
         db.add(msg)
         imported += 1
 
-    if imported == 0:
+    if imported > 0:
+        # Clean up any initialisation placeholder message
+        await db.execute(
+            delete(WhatsAppMessage).where(
+                WhatsAppMessage.lead_id == lead_id,
+                WhatsAppMessage.instance_name == instance_name,
+                WhatsAppMessage.content == "[Chat Initialised - No previous history found]"
+            )
+        )
+        await db.commit()
+    else:
         # Check if any messages exist for this chat already
         existing_chat = await db.execute(
             select(WhatsAppMessage).where(
@@ -648,8 +698,6 @@ async def sync_chat_history(
             )
             db.add(sys_msg)
             await db.commit()
-    else:
-        await db.commit()
 
     return {"imported": imported, "lead_id": lead_id}
 
