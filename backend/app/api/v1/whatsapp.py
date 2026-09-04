@@ -183,10 +183,8 @@ async def list_chats(
     Returns a summary per lead: last message, timestamp, and unread count.
     Managers/admins see all chats; sales reps see only their assigned leads.
     """
-    from sqlalchemy import or_
-
+    # Subquery: latest message per lead for THIS user's instance
     instance_name = f"rep_{current_user.id}"
-    # Subquery: latest message per lead for THIS user's instance or assigned user
     latest_msg_sq = (
         select(
             WhatsAppMessage.lead_id,
@@ -194,11 +192,7 @@ async def list_chats(
         )
         .where(
             WhatsAppMessage.lead_id.isnot(None),
-            or_(
-                WhatsAppMessage.instance_name == instance_name,
-                WhatsAppMessage.instance_name.is_(None),
-                WhatsAppMessage.user_id == current_user.id,
-            ),
+            WhatsAppMessage.instance_name == instance_name,
         )
         .group_by(WhatsAppMessage.lead_id)
         .subquery()
@@ -233,17 +227,13 @@ async def list_chats(
 
     chats = []
     for row in rows:
-        # Count unread
+        # Count unread (inbound messages not yet read — simplified: all inbound)
         unread_result = await db.execute(
             select(func.count(WhatsAppMessage.id)).where(
                 WhatsAppMessage.lead_id == row.lead_id,
                 WhatsAppMessage.direction == MessageDirection.inbound,
                 WhatsAppMessage.status != "read",
-                or_(
-                    WhatsAppMessage.instance_name == instance_name,
-                    WhatsAppMessage.instance_name.is_(None),
-                    WhatsAppMessage.user_id == current_user.id,
-                ),
+                WhatsAppMessage.instance_name == instance_name,
             )
         )
         unread_count = unread_result.scalar() or 0
@@ -272,8 +262,6 @@ async def get_chat_messages(
 
     Returns messages ordered by timestamp ascending (oldest first).
     """
-    from sqlalchemy import or_
-
     # Verify lead exists and user has access
     lead = await db.get(Lead, lead_id)
     if not lead:
@@ -288,11 +276,7 @@ async def get_chat_messages(
         select(WhatsAppMessage)
         .where(
             WhatsAppMessage.lead_id == lead_id,
-            or_(
-                WhatsAppMessage.instance_name == instance_name,
-                WhatsAppMessage.instance_name.is_(None),
-                WhatsAppMessage.user_id == current_user.id,
-            ),
+            WhatsAppMessage.instance_name == instance_name,
         )
         .order_by(WhatsAppMessage.timestamp.asc())
     )
@@ -565,7 +549,7 @@ async def sync_chat_history(
     Returns a count of newly imported messages.
     """
     import json
-    from sqlalchemy import delete, or_
+    from sqlalchemy import delete
 
     lead = await db.get(Lead, lead_id)
     if not lead:
@@ -581,33 +565,10 @@ async def sync_chat_history(
     # Build the WhatsApp JID for this lead's phone number
     clean_phone = _normalise_phone_for_wa(lead.phone_number)
     remote_jid = f"{clean_phone}@s.whatsapp.net"
-    digits = _extract_digits(lead.phone_number)
-    suffix10 = digits[-10:] if len(digits) >= 10 else digits
 
-    imported = 0
-
-    # Step A: Link any unlinked messages already stored in local DB
-    if suffix10:
-        unlinked_res = await db.execute(
-            select(WhatsAppMessage).where(
-                or_(
-                    WhatsAppMessage.sender_phone.like(f"%{suffix10}%"),
-                    WhatsAppMessage.receiver_phone.like(f"%{suffix10}%"),
-                )
-            )
-        )
-        for unlinked in unlinked_res.scalars().all():
-            if unlinked.lead_id != lead_id or unlinked.instance_name != instance_name:
-                unlinked.lead_id = lead_id
-                unlinked.user_id = lead.assigned_rep_id
-                unlinked.instance_name = instance_name
-                imported += 1
-
-    # Step B: Fetch up to 100 historical messages from Evolution API using multi-strategy fallback
+    # Fetch up to 50 historical messages from Evolution API using multi-strategy fallback
     try:
-        raw_messages = await evo_client.fetch_messages(
-            instance_name, remote_jid, lead_name=lead.name, count=100
-        )
+        raw_messages = await evo_client.fetch_messages(instance_name, remote_jid, count=50)
     except Exception as exc:
         logger.exception("Failed to fetch history from Evolution API: %s", exc)
         raise HTTPException(
@@ -615,6 +576,7 @@ async def sync_chat_history(
             detail="Could not fetch history from WhatsApp. Make sure your WhatsApp is still connected.",
         )
 
+    imported = 0
     for raw in raw_messages:
         if not isinstance(raw, dict):
             continue
@@ -630,16 +592,10 @@ async def sync_chat_history(
 
         # Dedup by whatsapp_msg_id
         if wa_msg_id:
-            existing_res = await db.execute(
+            existing = await db.execute(
                 select(WhatsAppMessage).where(WhatsAppMessage.whatsapp_msg_id == str(wa_msg_id))
             )
-            existing = existing_res.scalar_one_or_none()
-            if existing:
-                if existing.lead_id != lead_id or existing.instance_name != instance_name:
-                    existing.lead_id = lead_id
-                    existing.user_id = lead.assigned_rep_id
-                    existing.instance_name = instance_name
-                    imported += 1
+            if existing.scalar_one_or_none():
                 continue
 
         # Extract content
@@ -713,6 +669,7 @@ async def sync_chat_history(
         await db.execute(
             delete(WhatsAppMessage).where(
                 WhatsAppMessage.lead_id == lead_id,
+                WhatsAppMessage.instance_name == instance_name,
                 WhatsAppMessage.content == "[Chat Initialised - No previous history found]"
             )
         )
@@ -722,11 +679,7 @@ async def sync_chat_history(
         existing_chat = await db.execute(
             select(WhatsAppMessage).where(
                 WhatsAppMessage.lead_id == lead_id,
-                or_(
-                    WhatsAppMessage.instance_name == instance_name,
-                    WhatsAppMessage.instance_name.is_(None),
-                    WhatsAppMessage.user_id == current_user.id,
-                )
+                WhatsAppMessage.instance_name == instance_name
             )
         )
         if not existing_chat.scalars().first():

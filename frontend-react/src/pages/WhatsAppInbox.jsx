@@ -149,16 +149,16 @@ export default function WhatsAppInbox() {
   const handleSyncChat = async () => {
     if (!selectedLeadId) return;
     
+    // Set a local loading state if needed, but since it's fast we'll just show toast
     const loadingToast = toast.loading('Syncing latest messages...');
     try {
       const res = await syncChatHistory(selectedLeadId);
       if (res.imported > 0) {
         toast.success(`Synced ${res.imported} new message(s)!`, { id: loadingToast });
+        loadMessages(); // reload messages
       } else {
         toast.success('Chat is already up to date', { id: loadingToast });
       }
-      loadMessages(); // reload messages for current chat
-      loadChats();    // refresh sidebar chat list
     } catch (err) {
       toast.error('Failed to sync chat history', { id: loadingToast });
     }
