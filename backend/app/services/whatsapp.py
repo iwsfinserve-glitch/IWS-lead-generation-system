@@ -130,23 +130,33 @@ class EvolutionAPIClient:
 
     @staticmethod
     def _parse_message_response(data) -> list[dict]:
-        """Parse Evolution API response into a flat list of message dicts.
-
-        Evolution API v2.x can return messages in several wrapper formats.
-        This normalises all of them into a simple list.
-        """
+        """Deeply search and extract a list of message dicts from any Evolution API response format."""
         if isinstance(data, list):
             return [d for d in data if isinstance(d, dict)]
-        if isinstance(data, dict):
-            for key in ["messages", "records", "data", "rows", "items", "response", "result", "chats"]:
-                val = data.get(key)
-                if isinstance(val, list):
-                    return [d for d in val if isinstance(d, dict)]
-                if isinstance(val, dict):
-                    for subkey in ["records", "rows", "data", "messages", "items", "response", "result"]:
-                        inner = val.get(subkey)
-                        if isinstance(inner, list):
-                            return [d for d in inner if isinstance(d, dict)]
+        
+        if not isinstance(data, dict):
+            return []
+
+        # Check top-level keys first
+        for key in ["messages", "records", "data", "rows", "items", "response", "result", "chats", "findMessages"]:
+            val = data.get(key)
+            if isinstance(val, list) and val and isinstance(val[0], dict):
+                return val
+            if isinstance(val, dict):
+                for subkey in ["records", "rows", "data", "messages", "items", "response", "result"]:
+                    inner = val.get(subkey)
+                    if isinstance(inner, list) and inner and isinstance(inner[0], dict):
+                        return inner
+
+        # If still empty, recursively search dict for the first list of dicts that looks like messages
+        for k, v in data.items():
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                if any("key" in d or "message" in d or "id" in d or "body" in d or "remoteJid" in d for d in v[:3]):
+                    return v
+            elif isinstance(v, dict):
+                found = EvolutionAPIClient._parse_message_response(v)
+                if found:
+                    return found
         return []
 
     async def fetch_messages(
@@ -157,16 +167,8 @@ class EvolutionAPIClient:
     ) -> list[dict]:
         """Fetch message history from Evolution API for a specific contact.
 
-        Uses multiple fallback strategies to support all Evolution API v2 query formats:
-        1. "number" parameter with normalized phone numbers (v2.3.7 primary)
-        2. "where" clauses targeting remoteJid variants (key.remoteJid, remoteJid)
-        3. Discovering chat via findChats and fetching with exact remoteJid
-        4. Batch findMessages with local Python-side contact filtering
-
-        Args:
-            instance_name: The Evolution API session name (e.g. "rep_1").
-            phone: Contact phone in any format.
-            count: Maximum number of messages to return (default 100).
+        Supports multi-device JIDs (e.g. 919876543210:0@s.whatsapp.net),
+        querying by number, where clause, findChats discovery, and batch filtering.
         """
         import re
 
@@ -184,24 +186,39 @@ class EvolutionAPIClient:
             f"{suffix10}@s.whatsapp.net",
         ]))
 
+        def _extract_jid_phone(jid_str: str) -> str:
+            if not jid_str:
+                return ""
+            # Strip server and multi-device identifier (e.g. "919876543210:0@s.whatsapp.net" -> "919876543210")
+            user_part = str(jid_str).split("@")[0].split(":")[0]
+            return re.sub(r"\D", "", user_part)
+
         def _is_chat_message(m: dict) -> bool:
             """Check if a message dict strictly belongs to this lead contact."""
             if not isinstance(m, dict):
                 return False
             key = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
-            jid = str(key.get("remoteJid") or m.get("remoteJid") or "")
+            jid = str(key.get("remoteJid") or m.get("remoteJid") or m.get("chatId") or m.get("from") or m.get("to") or "")
             # Skip groups, broadcasts, newsletters
             if not jid or "@g.us" in jid or "@broadcast" in jid or "@newsletter" in jid:
                 return False
-            if jid in candidate_jids:
+            
+            # Base JID match
+            jid_base = jid.split(":")[0] + ("@" + jid.split("@")[1] if "@" in jid else "")
+            if jid in candidate_jids or jid_base in candidate_jids:
                 return True
-            jid_digits = re.sub(r"\D", "", jid.split("@")[0].split(":")[0])
-            if jid_digits and (jid_digits == clean_12 or jid_digits == digits or (len(suffix10) == 10 and jid_digits.endswith(suffix10))):
-                return True
+            
+            # Digits match (handles device suffixes cleanly)
+            jid_digits = _extract_jid_phone(jid)
+            if jid_digits:
+                if jid_digits == clean_12 or jid_digits == digits:
+                    return True
+                if len(suffix10) == 10 and (jid_digits.endswith(suffix10) or suffix10 in jid_digits):
+                    return True
             return False
 
         async with httpx.AsyncClient(timeout=25) as client:
-            # Strategy 1: "number" field (Evolution API v2.3.7 documented format)
+            # Strategy 1: "number" field (Evolution API v2.3.7 primary)
             for num in candidate_numbers:
                 try:
                     resp = await client.post(
@@ -252,12 +269,12 @@ class EvolutionAPIClient:
                             chats_data = self._parse_message_response(c_resp.json())
                             for ch in chats_data:
                                 ch_jid = str(ch.get("remoteJid") or ch.get("id") or ch.get("jid") or "")
-                                ch_phone = re.sub(r"\D", "", ch_jid.split("@")[0].split(":")[0])
-                                if (suffix10 and suffix10 in ch_phone) or ch_jid in candidate_jids:
+                                ch_phone = _extract_jid_phone(ch_jid)
+                                if (suffix10 and suffix10 in ch_phone) or ch_jid in candidate_jids or _is_chat_message(ch):
                                     for p in [
                                         {"where": {"remoteJid": ch_jid}, "limit": count},
                                         {"where": {"key": {"remoteJid": ch_jid}}, "limit": count},
-                                        {"number": ch_phone},
+                                        {"number": ch_phone or ch_jid},
                                     ]:
                                         m_resp = await client.post(self._url(f"/chat/findMessages/{instance_name}"), headers=self.headers, json=p)
                                         if m_resp.status_code == 200:
@@ -340,8 +357,11 @@ def extract_content_and_media(message_obj: dict | str | None, raw: dict | None =
             return message_obj, None
 
     if not isinstance(message_obj, dict):
-        content = raw.get("body") or raw.get("content") or raw.get("text") or ""
-        return str(content).strip(), None
+        content = raw.get("body") or raw.get("content") or raw.get("text") or raw.get("message") or ""
+        if isinstance(content, dict):
+            message_obj = content
+        else:
+            return str(content).strip(), None
 
     # Unwrap ephemeral or viewOnce wrapper if present
     for wrapper in ["ephemeralMessage", "viewOnceMessage", "viewOnceMessageV2", "documentWithCaptionMessage"]:
@@ -357,6 +377,12 @@ def extract_content_and_media(message_obj: dict | str | None, raw: dict | None =
         content = str(message_obj["conversation"])
     elif "extendedTextMessage" in message_obj and isinstance(message_obj["extendedTextMessage"], dict):
         content = str(message_obj["extendedTextMessage"].get("text", ""))
+    elif "text" in message_obj and message_obj["text"]:
+        content = str(message_obj["text"])
+    elif "body" in message_obj and message_obj["body"]:
+        content = str(message_obj["body"])
+    elif "content" in message_obj and message_obj["content"]:
+        content = str(message_obj["content"])
     elif "imageMessage" in message_obj:
         media_type = "image"
         img = message_obj["imageMessage"] if isinstance(message_obj["imageMessage"], dict) else {}
@@ -379,7 +405,7 @@ def extract_content_and_media(message_obj: dict | str | None, raw: dict | None =
     elif "listResponseMessage" in message_obj and isinstance(message_obj["listResponseMessage"], dict):
         content = str(message_obj["listResponseMessage"].get("title") or "")
     else:
-        content = str(raw.get("body") or raw.get("content") or raw.get("text") or "")
+        content = str(raw.get("body") or raw.get("content") or raw.get("text") or raw.get("message") or "")
 
     return content.strip(), media_type
 
