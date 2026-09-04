@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import {
   MessageCircle, Send, Search, Phone, User, ArrowLeft,
@@ -241,13 +241,33 @@ export default function WhatsAppInbox() {
     }
   }, [selectedLeadId, messages.length, connectionStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Displayed chats (includes active newly added chat even before first message) ──
+  const displayedChats = useMemo(() => {
+    if (activeLead && !chats.some((c) => c.lead_id === activeLead.lead_id)) {
+      return [
+        {
+          lead_id: activeLead.lead_id,
+          lead_name: activeLead.lead_name,
+          lead_phone: activeLead.lead_phone,
+          lead_status: activeLead.lead_status,
+          last_message: 'No messages yet',
+          last_message_time: new Date().toISOString(),
+          unread_count: 0,
+          direction: null,
+        },
+        ...chats,
+      ];
+    }
+    return chats;
+  }, [chats, activeLead]);
+
   // ── Filter chats by search ────────────────────────────────────────
-  const filteredChats = chats.filter((c) =>
-    c.lead_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    c.lead_phone.includes(searchQuery)
+  const filteredChats = displayedChats.filter((c) =>
+    (c.lead_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (c.lead_phone || '').includes(searchQuery)
   );
 
-  const selectedChat = chats.find((c) => c.lead_id === selectedLeadId) || (activeLead?.lead_id === selectedLeadId ? activeLead : null);
+  const selectedChat = displayedChats.find((c) => c.lead_id === selectedLeadId) || (activeLead?.lead_id === selectedLeadId ? activeLead : null);
 
   // ── Format timestamp ──────────────────────────────────────────────
   const formatTime = (ts) => {
