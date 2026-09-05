@@ -386,12 +386,9 @@ class EvolutionAPIClient:
 
         Strategy (in priority order):
         1. number-param queries — Evolution API filters server-side. MOST RELIABLE.
-           Confirmed working in scratch/test_group_match.py and scratch/test_fetch.py.
+           We trust the API's filtering; do NOT re-filter by phone (kills @lid messages).
         2. JID-based queries — fallback if number-param returns nothing.
            Handles @lid privacy JIDs discovered via findContacts / findChats.
-
-        The old 'broad page scan' approach was REMOVED because Evolution API does not
-        reliably honour the `page` param, causing all pages to return the same 100 messages.
         """
         digits = re.sub(r"\D", "", str(phone or ""))
         if not digits:
@@ -399,82 +396,64 @@ class EvolutionAPIClient:
 
         suffix10 = digits[-10:] if len(digits) >= 10 else digits
         clean_12 = f"91{suffix10}" if len(suffix10) == 10 else digits
-        # Unique candidate numbers to query (preserve order, no duplicates)
         candidate_numbers: list[str] = list(dict.fromkeys(
             n for n in [clean_12, digits, suffix10] if n
         ))
 
         seen_msg_ids: set = set()
-        matched: list[dict] = []
+        all_messages: list[dict] = []
 
-        def is_for_contact(m: dict) -> bool:
-            """Check whether this message belongs to the target phone contact."""
-            p = extract_contact_phone_from_message(m)
-            if p:
-                if p == clean_12 or p == digits:
-                    return True
-                if len(suffix10) >= 10 and (p.endswith(suffix10) or suffix10 in p):
-                    return True
-            # Fallback: check remoteJid / remoteJidAlt directly
-            key_d = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
-            for field in [
-                key_d.get("remoteJid"), key_d.get("remoteJidAlt"),
-                m.get("remoteJid"), m.get("remoteJidAlt"),
-            ]:
-                if not field:
-                    continue
-                f_str = str(field)
-                if "@g.us" in f_str or "@broadcast" in f_str:
-                    continue
-                user = f_str.split("@")[0].split(":")[0]
-                user_digits = re.sub(r"\D", "", user)
-                if len(suffix10) >= 10 and user_digits.endswith(suffix10):
-                    return True
-            return False
-
-        def add_if_match(m: dict):
+        def add_msg(m: dict):
+            """Add message to result list, dedup by ID, skip groups."""
             if not isinstance(m, dict):
                 return
             key_d = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
             jid = str(key_d.get("remoteJid") or m.get("remoteJid") or "")
             if "@g.us" in jid or "@broadcast" in jid:
                 return
-            if not is_for_contact(m):
-                return
             wa_id = key_d.get("id") or m.get("id")
             if wa_id and wa_id in seen_msg_ids:
                 return
             if wa_id:
                 seen_msg_ids.add(wa_id)
-            matched.append(m)
+            all_messages.append(m)
 
-        # ── Strategy 1: number-param (server-side filter by Evolution API) ──────────
+        # ── Strategy 1: number-param ────────────────────────────────────
+        # Evolution API already filtered these by phone server-side.
+        # Do NOT re-filter — it kills messages whose remoteJid is an @lid privacy ID.
         for num in candidate_numbers:
             records = await self.fetch_messages_by_number(instance_name, num)
-            before = len(matched)
+            before = len(all_messages)
             for m in records:
-                add_if_match(m)
+                add_msg(m)
             logger.info(
-                "fetch_messages_for_contact: number=%s → %d raw records, %d new matched (total=%d)",
-                num, len(records), len(matched) - before, len(matched)
+                "fetch_messages_for_contact: number=%s → %d raw, %d new added (total=%d)",
+                num, len(records), len(all_messages) - before, len(all_messages)
             )
 
-        # ── Strategy 2: JID-based (handles @lid privacy IDs) ─────────────────────
-        if not matched:
+        # ── Strategy 2: JID-based fallback (only if number-param gave nothing) ───
+        if not all_messages:
             candidate_jids = await self.resolve_jids_for_phone(instance_name, phone)
             logger.info("Resolved JIDs for phone %s: %s", phone, candidate_jids)
             for jid in candidate_jids:
-                records = await self.fetch_messages(instance_name, jid, count=100)
-                before = len(matched)
+                records = await self.fetch_messages(instance_name, jid, count=1000)
+                before = len(all_messages)
                 for m in records:
-                    add_if_match(m)
+                    # For JID-based, we do check it's actually the right contact
+                    if not isinstance(m, dict):
+                        continue
+                    key_d = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
+                    msg_jid = str(key_d.get("remoteJid") or m.get("remoteJid") or "")
+                    if "@g.us" in msg_jid or "@broadcast" in msg_jid:
+                        continue
+                    add_msg(m)
                 logger.info(
-                    "fetch_messages_for_contact: JID=%s → %d raw records, %d new matched (total=%d)",
-                    jid, len(records), len(matched) - before, len(matched)
+                    "fetch_messages_for_contact: JID=%s → %d raw, %d new added (total=%d)",
+                    jid, len(records), len(all_messages) - before, len(all_messages)
                 )
 
-        logger.info("fetch_messages_for_contact: FINAL %d messages for phone=%s", len(matched), phone)
-        return matched
+        logger.info("fetch_messages_for_contact: FINAL %d messages for phone=%s", len(all_messages), phone)
+        return all_messages
 
 
 # Singleton-ish — imported as `from app.services.whatsapp import evo_client`

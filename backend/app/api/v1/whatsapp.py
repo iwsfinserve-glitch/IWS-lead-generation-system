@@ -557,6 +557,14 @@ async def sync_chat_history(
 
     logger.info("sync_chat_history: fetched %d raw messages for lead %d", len(raw_messages), lead_id)
 
+    # ── GUARD: if fetch returned nothing, abort — don't touch existing messages ──
+    if not raw_messages:
+        logger.warning("sync_chat_history: no messages fetched for lead %d, aborting wipe", lead_id)
+        raise HTTPException(
+            status_code=404,
+            detail="No messages found for this contact in WhatsApp. Make sure WhatsApp is connected and has chat history for this number.",
+        )
+
     # ── Step 2: Wipe existing messages for this lead+instance ─────────────
     await db.execute(
         sa_delete(WhatsAppMessage).where(
