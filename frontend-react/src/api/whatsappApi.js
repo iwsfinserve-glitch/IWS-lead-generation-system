@@ -38,3 +38,10 @@ export const getLeadsWithoutChats = () =>
 
 export const syncChatHistory = (leadId) =>
   api.post(`/whatsapp/chats/${leadId}/sync-history`).then((r) => r.data);
+
+export const getDebugContacts = (instanceName) =>
+  api.get(`/whatsapp/debug/contacts/${instanceName}`).then((r) => r.data);
+
+export const getDebugChats = (instanceName) =>
+  api.get(`/whatsapp/debug/chats/${instanceName}`).then((r) => r.data);
+

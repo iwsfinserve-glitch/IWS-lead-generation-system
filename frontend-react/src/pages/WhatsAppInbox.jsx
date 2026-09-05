@@ -44,8 +44,10 @@ export default function WhatsAppInbox() {
     try {
       const data = await getWhatsAppChats();
       setChats(data);
+      return data;
     } catch {
       // Silent — chats may be empty
+      return [];
     } finally {
       setLoading(false);
     }
@@ -155,10 +157,11 @@ export default function WhatsAppInbox() {
       const res = await syncChatHistory(selectedLeadId);
       if (res.imported > 0) {
         toast.success(`Synced ${res.imported} new message(s)!`, { id: loadingToast });
-        loadMessages(); // reload messages
       } else {
         toast.success('Chat is already up to date', { id: loadingToast });
       }
+      await loadMessages();
+      await loadChats();
     } catch (err) {
       toast.error('Failed to sync chat history', { id: loadingToast });
     }
@@ -413,14 +416,10 @@ export default function WhatsAppInbox() {
       {showStartChatModal && (
         <StartChatModal
           onClose={() => setShowStartChatModal(false)}
-          onChatReady={(leadId) => {
+          onChatReady={async (leadId) => {
             setShowStartChatModal(false);
-            // Refresh chat list first, then open the chat
-            loadChats().then ? loadChats() : undefined;
-            setTimeout(() => {
-              loadChats();
-              handleSelectChat(leadId);
-            }, 600);
+            await loadChats();
+            handleSelectChat(leadId);
           }}
         />
       )}

@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.db.base import Lead, User
-from app.models.whatsapp_message import WhatsAppMessage, MessageDirection
+from app.models.whatsapp_message import WhatsAppMessage, MessageDirection, MessageStatus
 from app.schemas.whatsapp import (
     WhatsAppMessageRead,
     WhatsAppSendMessage,
@@ -40,7 +40,9 @@ from app.services.whatsapp import (
     process_incoming_message,
     save_outbound_message,
     match_lead_by_phone,
-    _normalise_phone_for_wa
+    _normalise_phone_for_wa,
+    extract_content_and_media,
+    extract_timestamp,
 )
 
 logger = logging.getLogger(__name__)
@@ -523,10 +525,10 @@ async def sync_chat_history(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Fetch past WhatsApp messages from Evolution API and import into the CRM.
+    """Fetch all past historical WhatsApp messages from Evolution API and import into the CRM.
 
-    Reaches out to the Evolution API's findMessages endpoint, filters for
-    this lead's phone number, deduplicates, and saves all new messages.
+    Pulls all previous conversation history from Evolution API (including messages from before
+    the lead was added to CRM), deduplicates, and saves all messages to the CRM.
     Returns a count of newly imported messages.
     """
     lead = await db.get(Lead, lead_id)
@@ -539,70 +541,45 @@ async def sync_chat_history(
         raise HTTPException(status_code=403, detail="Access denied")
 
     instance_name = f"rep_{current_user.id}"
-
-    # Build the WhatsApp JID for this lead's phone number
-    # Auto-handle 10-digit numbers by prepending 91
     clean_phone = _normalise_phone_for_wa(lead.phone_number)
-    remote_jid = f"{clean_phone}@s.whatsapp.net"
 
-    # Fetch up to 50 historical messages from Evolution API
+    # Fetch ALL historical messages for this contact from Evolution API
     try:
-        raw_messages = await evo_client.fetch_messages(instance_name, remote_jid, count=50)
+        raw_messages = await evo_client.fetch_messages_for_contact(instance_name, lead.phone_number)
     except Exception as exc:
         logger.exception("Failed to fetch history from Evolution API: %s", exc)
         raise HTTPException(
             status_code=502,
-            detail="Could not fetch history from WhatsApp. Make sure your WhatsApp is still connected.",
+            detail="Could not fetch history from WhatsApp. Make sure your WhatsApp is connected.",
         )
 
     imported = 0
     for raw in raw_messages:
-        key = raw.get("key", {})
-        wa_msg_id = key.get("id")
-        from_me = key.get("fromMe", False)
+        key = raw.get("key", {}) if isinstance(raw.get("key"), dict) else {}
+        wa_msg_id = key.get("id") or raw.get("id")
+        from_me = bool(key.get("fromMe") if "fromMe" in key else raw.get("fromMe", False))
 
         # Skip group messages
-        jid = key.get("remoteJid", "")
-        if "@g.us" in jid:
+        jid = key.get("remoteJid") or raw.get("remoteJid") or ""
+        if "@g.us" in str(jid):
             continue
 
-        # Dedup by whatsapp_msg_id
+        # Check if already exists in DB
         if wa_msg_id:
             existing = await db.execute(
-                select(WhatsAppMessage).where(WhatsAppMessage.whatsapp_msg_id == wa_msg_id)
+                select(WhatsAppMessage).where(WhatsAppMessage.whatsapp_msg_id == str(wa_msg_id))
             )
-            if existing.scalar_one_or_none():
+            msg_obj = existing.scalar_one_or_none()
+            if msg_obj:
+                if msg_obj.lead_id is None:
+                    msg_obj.lead_id = lead_id
+                    msg_obj.user_id = lead.assigned_rep_id
+                    msg_obj.instance_name = instance_name
                 continue
 
-        # Extract content
-        message_obj = raw.get("message", {})
-        content = (
-            message_obj.get("conversation")
-            or message_obj.get("extendedTextMessage", {}).get("text")
-            or ""
-        )
-        media_type = None
-        if "imageMessage" in message_obj:
-            media_type = "image"
-            content = content or message_obj["imageMessage"].get("caption", "[Image]")
-        elif "videoMessage" in message_obj:
-            media_type = "video"
-            content = content or "[Video]"
-        elif "audioMessage" in message_obj:
-            media_type = "audio"
-            content = content or "[Voice Note]"
-        elif "documentMessage" in message_obj:
-            media_type = "document"
-            content = content or message_obj["documentMessage"].get("fileName", "[Document]")
-
-        # Parse timestamp
-        ts = None
-        raw_ts = raw.get("messageTimestamp")
-        if raw_ts:
-            try:
-                ts = datetime.fromtimestamp(int(raw_ts), tz=timezone.utc)
-            except (ValueError, TypeError):
-                ts = None
+        # Extract content & media
+        content, media_type = extract_content_and_media(raw.get("message"), raw)
+        ts = extract_timestamp(raw)
 
         direction = MessageDirection.outbound if from_me else MessageDirection.inbound
         sender = instance_name if from_me else clean_phone
@@ -611,15 +588,15 @@ async def sync_chat_history(
         msg = WhatsAppMessage(
             lead_id=lead_id,
             user_id=lead.assigned_rep_id,
-            whatsapp_msg_id=wa_msg_id,
+            whatsapp_msg_id=str(wa_msg_id) if wa_msg_id else f"evo_{lead.id}_{int(ts.timestamp())}_{1 if from_me else 0}",
             instance_name=instance_name,
             sender_phone=sender,
             receiver_phone=receiver,
             direction=direction,
             content=content if content else None,
             media_type=media_type,
-            status="delivered",
-            timestamp=ts or datetime.now(timezone.utc),
+            status=MessageStatus.delivered,
+            timestamp=ts,
         )
         db.add(msg)
         imported += 1
@@ -643,7 +620,7 @@ async def sync_chat_history(
                 receiver_phone=clean_phone,
                 direction=MessageDirection.outbound,
                 content="[Chat Initialised - No previous history found]",
-                status="delivered",
+                status=MessageStatus.delivered,
                 timestamp=datetime.now(timezone.utc),
             )
             db.add(sys_msg)
@@ -685,3 +662,37 @@ async def delete_chat(
     await db.commit()
 
     return {"status": "success", "message": "Chat deleted"}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Debug Endpoints (Admin / Manager)
+# ═══════════════════════════════════════════════════════════════════════
+
+@router.get("/debug/contacts/{instance_name}")
+async def debug_contacts(
+    instance_name: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Debug endpoint: Fetch raw contacts from Evolution API."""
+    if not current_user.is_admin and not current_user.is_manager and f"rep_{current_user.id}" != instance_name:
+        raise HTTPException(status_code=403, detail="Access denied")
+    try:
+        contacts = await evo_client.find_contacts(instance_name)
+        return {"count": len(contacts), "contacts": contacts}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/debug/chats/{instance_name}")
+async def debug_chats(
+    instance_name: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Debug endpoint: Fetch raw chats from Evolution API."""
+    if not current_user.is_admin and not current_user.is_manager and f"rep_{current_user.id}" != instance_name:
+        raise HTTPException(status_code=403, detail="Access denied")
+    try:
+        chats = await evo_client.find_chats(instance_name)
+        return {"count": len(chats), "chats": chats}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
