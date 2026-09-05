@@ -44,6 +44,7 @@ from app.services.whatsapp import (
     extract_content_and_media,
     extract_timestamp,
 )
+from sqlalchemy import delete as sa_delete
 
 logger = logging.getLogger(__name__)
 
@@ -525,11 +526,12 @@ async def sync_chat_history(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Fetch all past historical WhatsApp messages from Evolution API and import into the CRM.
+    """Nuclear sync: wipe existing chat and re-import ALL messages from Evolution API.
 
-    Pulls all previous conversation history from Evolution API (including messages from before
-    the lead was added to CRM), deduplicates, and saves all messages to the CRM.
-    Returns a count of newly imported messages.
+    1. Deletes every existing WhatsApp message for this lead + instance.
+    2. Fetches the complete conversation history from Evolution API (up to 1000 msgs).
+    3. Saves all messages with text content (media-only messages without captions skipped).
+    This guarantees a fresh, authoritative copy of the conversation.
     """
     lead = await db.get(Lead, lead_id)
     if not lead:
@@ -543,7 +545,7 @@ async def sync_chat_history(
     instance_name = f"rep_{current_user.id}"
     clean_phone = _normalise_phone_for_wa(lead.phone_number)
 
-    # Fetch ALL historical messages for this contact from Evolution API
+    # ── Step 1: Fetch ALL messages from Evolution API ─────────────────────
     try:
         raw_messages = await evo_client.fetch_messages_for_contact(instance_name, lead.phone_number)
     except Exception as exc:
@@ -553,6 +555,18 @@ async def sync_chat_history(
             detail="Could not fetch history from WhatsApp. Make sure your WhatsApp is connected.",
         )
 
+    logger.info("sync_chat_history: fetched %d raw messages for lead %d", len(raw_messages), lead_id)
+
+    # ── Step 2: Wipe existing messages for this lead+instance ─────────────
+    await db.execute(
+        sa_delete(WhatsAppMessage).where(
+            WhatsAppMessage.lead_id == lead_id,
+            WhatsAppMessage.instance_name == instance_name,
+        )
+    )
+    await db.flush()  # flush the delete before inserting
+
+    # ── Step 3: Re-save everything fresh ──────────────────────────────────
     imported = 0
     for raw in raw_messages:
         key = raw.get("key", {}) if isinstance(raw.get("key"), dict) else {}
@@ -560,27 +574,22 @@ async def sync_chat_history(
         from_me = bool(key.get("fromMe") if "fromMe" in key else raw.get("fromMe", False))
 
         # Skip group messages
-        jid = key.get("remoteJid") or raw.get("remoteJid") or ""
-        if "@g.us" in str(jid):
+        jid = str(key.get("remoteJid") or raw.get("remoteJid") or "")
+        if "@g.us" in jid or "@broadcast" in jid:
             continue
 
-        # Check if already exists in DB
-        if wa_msg_id:
-            existing = await db.execute(
-                select(WhatsAppMessage).where(WhatsAppMessage.whatsapp_msg_id == str(wa_msg_id))
-            )
-            msg_obj = existing.scalar_one_or_none()
-            if msg_obj:
-                if msg_obj.lead_id is None:
-                    msg_obj.lead_id = lead_id
-                    msg_obj.user_id = lead.assigned_rep_id
-                    msg_obj.instance_name = instance_name
-                continue
-
-        # Extract content & media
+        # Extract content & media type
         content, media_type = extract_content_and_media(raw.get("message"), raw)
-        ts = extract_timestamp(raw)
 
+        # Skip pure media messages with no caption/text (as requested)
+        if not content and media_type in ("audio", "video", "image", "document", "sticker"):
+            continue
+
+        # Use a placeholder for empty text messages we still want to track
+        if not content:
+            content = f"[{media_type.title()}]" if media_type else None
+
+        ts = extract_timestamp(raw)
         direction = MessageDirection.outbound if from_me else MessageDirection.inbound
         sender = instance_name if from_me else clean_phone
         receiver = clean_phone if from_me else instance_name
@@ -588,12 +597,12 @@ async def sync_chat_history(
         msg = WhatsAppMessage(
             lead_id=lead_id,
             user_id=lead.assigned_rep_id,
-            whatsapp_msg_id=str(wa_msg_id) if wa_msg_id else f"evo_{lead.id}_{int(ts.timestamp())}_{1 if from_me else 0}",
+            whatsapp_msg_id=str(wa_msg_id) if wa_msg_id else f"evo_{lead_id}_{int(ts.timestamp())}_{1 if from_me else 0}",
             instance_name=instance_name,
             sender_phone=sender,
             receiver_phone=receiver,
             direction=direction,
-            content=content if content else None,
+            content=content,
             media_type=media_type,
             status=MessageStatus.delivered,
             timestamp=ts,
@@ -601,34 +610,26 @@ async def sync_chat_history(
         db.add(msg)
         imported += 1
 
+    # ── Step 4: If nothing came back, add a placeholder so chat stays visible
     if imported == 0:
-        # Check if any messages exist for this chat already
-        existing_chat = await db.execute(
-            select(WhatsAppMessage).where(
-                WhatsAppMessage.lead_id == lead_id,
-                WhatsAppMessage.instance_name == instance_name
-            )
+        sys_msg = WhatsAppMessage(
+            lead_id=lead_id,
+            user_id=lead.assigned_rep_id,
+            whatsapp_msg_id=f"sys_init_{lead_id}_{int(datetime.now().timestamp())}",
+            instance_name=instance_name,
+            sender_phone=instance_name,
+            receiver_phone=clean_phone,
+            direction=MessageDirection.outbound,
+            content="[No previous conversation history found]",
+            status=MessageStatus.delivered,
+            timestamp=datetime.now(timezone.utc),
         )
-        if not existing_chat.scalars().first():
-            # Initialise with a system message so the chat appears in the sidebar
-            sys_msg = WhatsAppMessage(
-                lead_id=lead_id,
-                user_id=lead.assigned_rep_id,
-                whatsapp_msg_id=f"sys_init_{lead_id}_{int(datetime.now().timestamp())}",
-                instance_name=instance_name,
-                sender_phone=instance_name,
-                receiver_phone=clean_phone,
-                direction=MessageDirection.outbound,
-                content="[Chat Initialised - No previous history found]",
-                status=MessageStatus.delivered,
-                timestamp=datetime.now(timezone.utc),
-            )
-            db.add(sys_msg)
-            await db.commit()
-    else:
-        await db.commit()
+        db.add(sys_msg)
 
-    return {"imported": imported, "lead_id": lead_id}
+    await db.commit()
+
+    logger.info("sync_chat_history: imported %d messages for lead %d", imported, lead_id)
+    return {"imported": imported, "lead_id": lead_id, "wiped_and_refreshed": True}
 
 
 # ═══════════════════════════════════════════════════════════════════════

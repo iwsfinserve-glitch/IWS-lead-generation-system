@@ -335,7 +335,7 @@ class EvolutionAPIClient:
         self,
         instance_name: str,
         number: str,
-        limit: int = 100,
+        limit: int = 1000,
     ) -> list[dict]:
         """Fetch messages by phone number using Evolution API's built-in number filter.
 
