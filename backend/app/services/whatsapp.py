@@ -11,7 +11,9 @@ authenticated by a global API key.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
+from typing import Optional
 
 import httpx
 from sqlalchemy import select, func, case
@@ -127,6 +129,20 @@ class EvolutionAPIClient:
             )
             resp.raise_for_status()
             return resp.json()
+
+    def _parse_message_records(self, data) -> list[dict]:
+        """Parse Evolution API findMessages response into a flat list of message records."""
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            records = (
+                (data.get("messages") or {}).get("records")
+                if isinstance(data.get("messages"), dict)
+                else None
+            ) or data.get("records") or data.get("data") or []
+            if isinstance(records, list):
+                return records
+        return []
 
     async def find_contacts(self, instance_name: str) -> list[dict]:
         """Fetch all contacts for an instance from Evolution API."""
@@ -315,20 +331,39 @@ class EvolutionAPIClient:
 
         return candidates
 
+    async def fetch_messages_by_number(
+        self,
+        instance_name: str,
+        number: str,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Fetch messages by phone number using Evolution API's built-in number filter.
+
+        This is the most reliable approach — Evolution API filters server-side.
+        Confirmed working via test_group_match.py scratch tests.
+        """
+        async with httpx.AsyncClient(timeout=30) as client:
+            try:
+                resp = await client.post(
+                    self._url(f"/chat/findMessages/{instance_name}"),
+                    headers=self.headers,
+                    json={"number": number, "limit": limit},
+                )
+                if resp.status_code == 200:
+                    return self._parse_message_records(resp.json())
+            except Exception as exc:
+                logger.debug("fetch_messages_by_number failed for %s (number=%s): %s", instance_name, number, exc)
+        return []
+
     async def fetch_messages(
         self,
         instance_name: str,
         remote_jid: str,
         count: int = 100,
-        page: int = 1,
     ) -> list[dict]:
-        """Fetch historical messages from Evolution API for a specific chat.
+        """Fetch historical messages from Evolution API for a specific JID.
 
-        Args:
-            instance_name: The Evolution API session name.
-            remote_jid: The WhatsApp JID of the contact.
-            count: Max number of messages to fetch per page.
-            page: Page number for pagination.
+        Uses where.key.remoteJid filter. Works best when the exact JID is known.
         """
         async with httpx.AsyncClient(timeout=30) as client:
             try:
@@ -336,192 +371,161 @@ class EvolutionAPIClient:
                     self._url(f"/chat/findMessages/{instance_name}"),
                     headers=self.headers,
                     json={
-                        "where": {
-                            "key": {"remoteJid": remote_jid},
-                        },
-                        "limit": count,
-                        "page": page,
-                    },
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data, dict):
-                        records = (
-                            data.get("messages", {}).get("records")
-                            or data.get("records")
-                            or data.get("messages")
-                            or data.get("data")
-                            or []
-                        )
-                        if isinstance(records, list):
-                            return records
-                    if isinstance(data, list):
-                        return data
-            except Exception as exc:
-                logger.debug("findMessages with page failed: %s", exc)
-
-            # Fallback without page parameter
-            try:
-                resp = await client.post(
-                    self._url(f"/chat/findMessages/{instance_name}"),
-                    headers=self.headers,
-                    json={
-                        "where": {
-                            "key": {"remoteJid": remote_jid},
-                        },
+                        "where": {"key": {"remoteJid": remote_jid}},
                         "limit": count,
                     },
                 )
-                resp.raise_for_status()
-                data = resp.json()
-                if isinstance(data, dict):
-                    records = (
-                        data.get("messages", {}).get("records")
-                        or data.get("records")
-                        or data.get("messages")
-                        or data.get("data")
-                        or []
-                    )
-                    if isinstance(records, list):
-                        return records
-                if isinstance(data, list):
-                    return data
-            except Exception as exc:
-                logger.warning("fetch_messages failed for %s (JID %s): %s", instance_name, remote_jid, exc)
-            return []
-
-    async def fetch_all_messages_page(
-        self,
-        instance_name: str,
-        page: int = 1,
-        limit: int = 100,
-    ) -> list[dict]:
-        """Fetch a page of messages for an instance without JID filter."""
-        async with httpx.AsyncClient(timeout=30) as client:
-            try:
-                resp = await client.post(
-                    self._url(f"/chat/findMessages/{instance_name}"),
-                    headers=self.headers,
-                    json={
-                        "page": page,
-                        "limit": limit,
-                    },
-                )
                 if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data, dict):
-                        records = (
-                            data.get("messages", {}).get("records")
-                            or data.get("records")
-                            or data.get("messages")
-                            or data.get("data")
-                            or []
-                        )
-                        if isinstance(records, list):
-                            return records
-                    if isinstance(data, list):
-                        return data
+                    return self._parse_message_records(resp.json())
             except Exception as exc:
-                logger.debug("fetch_all_messages_page failed on page %s: %s", page, exc)
-            return []
-
-    def _is_message_matching_phone(
-        self,
-        m: dict,
-        digits: str,
-        last10: str,
-        candidate_jids: list[str],
-    ) -> bool:
-        """Check if an Evolution API message record belongs to the given contact."""
-        if not isinstance(m, dict):
-            return False
-        key = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
-        jid = str(key.get("remoteJid") or m.get("remoteJid") or "")
-        if "@g.us" in jid:
-            return False
-
-        # Match against candidate JIDs
-        if jid in candidate_jids:
-            return True
-
-        alt = str(key.get("remoteJidAlt") or m.get("remoteJidAlt") or "")
-        participant = str(key.get("participant") or m.get("participant") or "")
-        sender = str(m.get("sender_phone") or m.get("sender") or "")
-        receiver = str(m.get("receiver_phone") or m.get("receiver") or "")
-
-        for field in (jid, alt, participant, sender, receiver):
-            if not field:
-                continue
-            if last10 and last10 in field:
-                return True
-            if digits and digits in field:
-                return True
-
-        return False
+                logger.debug("fetch_messages by JID failed for %s (JID=%s): %s", instance_name, remote_jid, exc)
+        return []
 
     async def fetch_messages_for_contact(self, instance_name: str, phone: str) -> list[dict]:
         """Fetch all historical messages for a specific phone number from Evolution API.
 
-        Combines targeted candidate JID queries with broad historical pagination to guarantee
-        that all messages from before the lead was created/added are retrieved.
+        Strategy (in priority order):
+        1. number-param queries — Evolution API filters server-side. MOST RELIABLE.
+           Confirmed working in scratch/test_group_match.py and scratch/test_fetch.py.
+        2. JID-based queries — fallback if number-param returns nothing.
+           Handles @lid privacy JIDs discovered via findContacts / findChats.
+
+        The old 'broad page scan' approach was REMOVED because Evolution API does not
+        reliably honour the `page` param, causing all pages to return the same 100 messages.
         """
-        digits = "".join(c for c in (phone or "") if c.isdigit())
+        digits = re.sub(r"\D", "", str(phone or ""))
         if not digits:
             return []
-        last10 = digits[-10:] if len(digits) >= 10 else digits
 
-        candidate_jids = await self.resolve_jids_for_phone(instance_name, phone)
-        logger.info("Fetching history for phone %s with candidate JIDs: %s", phone, candidate_jids)
+        suffix10 = digits[-10:] if len(digits) >= 10 else digits
+        clean_12 = f"91{suffix10}" if len(suffix10) == 10 else digits
+        # Unique candidate numbers to query (preserve order, no duplicates)
+        candidate_numbers: list[str] = list(dict.fromkeys(
+            n for n in [clean_12, digits, suffix10] if n
+        ))
 
-        matched_messages: list[dict] = []
-        seen_msg_ids = set()
+        seen_msg_ids: set = set()
+        matched: list[dict] = []
 
-        def add_msg(m: dict):
+        def is_for_contact(m: dict) -> bool:
+            """Check whether this message belongs to the target phone contact."""
+            p = extract_contact_phone_from_message(m)
+            if p:
+                if p == clean_12 or p == digits:
+                    return True
+                if len(suffix10) >= 10 and (p.endswith(suffix10) or suffix10 in p):
+                    return True
+            # Fallback: check remoteJid / remoteJidAlt directly
+            key_d = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
+            for field in [
+                key_d.get("remoteJid"), key_d.get("remoteJidAlt"),
+                m.get("remoteJid"), m.get("remoteJidAlt"),
+            ]:
+                if not field:
+                    continue
+                f_str = str(field)
+                if "@g.us" in f_str or "@broadcast" in f_str:
+                    continue
+                user = f_str.split("@")[0].split(":")[0]
+                user_digits = re.sub(r"\D", "", user)
+                if len(suffix10) >= 10 and user_digits.endswith(suffix10):
+                    return True
+            return False
+
+        def add_if_match(m: dict):
             if not isinstance(m, dict):
                 return
-            key = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
-            wa_id = key.get("id") or m.get("id")
-            jid = key.get("remoteJid") or m.get("remoteJid") or ""
-            if "@g.us" in str(jid):
+            key_d = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
+            jid = str(key_d.get("remoteJid") or m.get("remoteJid") or "")
+            if "@g.us" in jid or "@broadcast" in jid:
                 return
+            if not is_for_contact(m):
+                return
+            wa_id = key_d.get("id") or m.get("id")
             if wa_id and wa_id in seen_msg_ids:
                 return
             if wa_id:
                 seen_msg_ids.add(wa_id)
-            matched_messages.append(m)
+            matched.append(m)
 
-        # 1. Targeted fetch for each candidate JID (up to 5 pages per candidate)
-        for jid in candidate_jids:
-            for page in range(1, 6):
-                page_msgs = await self.fetch_messages(instance_name, jid, count=100, page=page)
-                if not page_msgs:
-                    break
-                for m in page_msgs:
-                    add_msg(m)
-                if len(page_msgs) < 100:
-                    break
+        # ── Strategy 1: number-param (server-side filter by Evolution API) ──────────
+        for num in candidate_numbers:
+            records = await self.fetch_messages_by_number(instance_name, num)
+            before = len(matched)
+            for m in records:
+                add_if_match(m)
+            logger.info(
+                "fetch_messages_for_contact: number=%s → %d raw records, %d new matched (total=%d)",
+                num, len(records), len(matched) - before, len(matched)
+            )
 
-        # 2. Broad historical scan across instance messages (pages 1 to 20)
-        # This catches all past messages created before lead was tracked in CRM
-        for page in range(1, 21):
-            try:
-                page_records = await self.fetch_all_messages_page(instance_name, page=page, limit=100)
-                if not page_records:
-                    break
-                for m in page_records:
-                    if self._is_message_matching_phone(m, digits, last10, candidate_jids):
-                        add_msg(m)
-                if len(page_records) < 100:
-                    break
-            except Exception as exc:
-                logger.debug("Broad historical scan page %s failed: %s", page, exc)
-                break
+        # ── Strategy 2: JID-based (handles @lid privacy IDs) ─────────────────────
+        if not matched:
+            candidate_jids = await self.resolve_jids_for_phone(instance_name, phone)
+            logger.info("Resolved JIDs for phone %s: %s", phone, candidate_jids)
+            for jid in candidate_jids:
+                records = await self.fetch_messages(instance_name, jid, count=100)
+                before = len(matched)
+                for m in records:
+                    add_if_match(m)
+                logger.info(
+                    "fetch_messages_for_contact: JID=%s → %d raw records, %d new matched (total=%d)",
+                    jid, len(records), len(matched) - before, len(matched)
+                )
 
-        return matched_messages
+        logger.info("fetch_messages_for_contact: FINAL %d messages for phone=%s", len(matched), phone)
+        return matched
 
 
 # Singleton-ish — imported as `from app.services.whatsapp import evo_client`
 evo_client = EvolutionAPIClient()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Phone Extraction Helper
+# ═══════════════════════════════════════════════════════════════════════
+
+def extract_contact_phone_from_message(raw_msg: dict) -> str:
+    """Extract the contact's phone digits from an Evolution API message record.
+
+    Checks remoteJidAlt / participantAlt first (alternative JID fields that often
+    contain the real phone number when the main JID is an @lid privacy identifier),
+    then falls back to remoteJid and other fields.
+
+    Returns only digit strings of length >= 10 to avoid matching short IDs.
+    Skips group/broadcast JIDs.
+    """
+    if not isinstance(raw_msg, dict):
+        return ""
+
+    key = raw_msg.get("key", {}) if isinstance(raw_msg.get("key"), dict) else {}
+    candidates = [
+        key.get("remoteJidAlt"), key.get("participantAlt"),
+        raw_msg.get("remoteJidAlt"), raw_msg.get("participantAlt"),
+        key.get("remoteJid"), raw_msg.get("remoteJid"),
+        raw_msg.get("chatId"), raw_msg.get("from"), raw_msg.get("to"),
+    ]
+
+    # First pass: skip group/broadcast/@lid JIDs
+    for c in candidates:
+        if not c:
+            continue
+        c_str = str(c)
+        if "@g.us" in c_str or "@broadcast" in c_str or "@newsletter" in c_str or "@lid" in c_str:
+            continue
+        user_part = c_str.split("@")[0].split(":")[0]
+        digits = re.sub(r"\D", "", user_part)
+        if len(digits) >= 10:
+            return digits
+
+    # Second pass: accept non-group JIDs even if they don't have a long digit string
+    for c in candidates:
+        if c and "@g.us" not in str(c) and "@broadcast" not in str(c):
+            user_part = str(c).split("@")[0].split(":")[0]
+            digits = re.sub(r"\D", "", user_part)
+            if digits:
+                return digits
+    return ""
 
 
 # ═══════════════════════════════════════════════════════════════════════
