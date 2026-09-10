@@ -25,6 +25,7 @@ export default function WhatsAppInbox() {
   // ── State ──────────────────────────────────────────────────────────
   const [chats, setChats] = useState([]);
   const [selectedLeadId, setSelectedLeadId] = useState(null);
+  const [activeLead, setActiveLead] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -122,8 +123,11 @@ export default function WhatsAppInbox() {
   };
 
   // ── Select a chat ─────────────────────────────────────────────────
-  const handleSelectChat = (leadId) => {
+  const handleSelectChat = (leadId, leadData = null) => {
     setSelectedLeadId(leadId);
+    if (leadData) {
+      setActiveLead(leadData);
+    }
     setMobileShowChat(true);
   };
 
@@ -140,6 +144,7 @@ export default function WhatsAppInbox() {
       await deleteWhatsAppChat(selectedLeadId);
       toast.success('Chat deleted');
       setSelectedLeadId(null);
+      setActiveLead(null);
       setMobileShowChat(false);
       loadChats();
     } catch (err) {
@@ -174,7 +179,13 @@ export default function WhatsAppInbox() {
     c.lead_phone.includes(searchQuery)
   );
 
-  const selectedChat = chats.find((c) => c.lead_id === selectedLeadId);
+  const matchedChat = chats.find((c) => c.lead_id === selectedLeadId);
+  const currentChatHeader = matchedChat || (activeLead ? {
+    lead_id: activeLead.id,
+    lead_name: activeLead.name,
+    lead_phone: activeLead.phone_number || '',
+    lead_status: activeLead.status,
+  } : null);
 
   // ── Format timestamp ──────────────────────────────────────────────
   const formatTime = (ts) => {
@@ -294,7 +305,7 @@ export default function WhatsAppInbox() {
 
         {/* ── Right Panel: Chat Thread ── */}
         <div className={`wa-chat-thread ${mobileShowChat ? 'wa-show-mobile' : ''}`}>
-          {selectedLeadId && selectedChat ? (
+          {selectedLeadId && currentChatHeader ? (
             <>
               {/* Chat Header */}
               <div className="wa-thread-header">
@@ -302,15 +313,15 @@ export default function WhatsAppInbox() {
                   <ArrowLeft size={18} />
                 </button>
                 <div className="wa-chat-avatar" style={{ width: 36, height: 36, fontSize: '0.85rem' }}>
-                  {selectedChat.lead_name.charAt(0).toUpperCase()}
+                  {(currentChatHeader.lead_name || 'U').charAt(0).toUpperCase()}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{selectedChat.lead_name}</div>
+                  <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{currentChatHeader.lead_name}</div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                     <Phone size={10} style={{ marginRight: 3 }} />
-                    {selectedChat.lead_phone}
-                    {selectedChat.lead_status && (
-                      <span className="wa-status-pill">{selectedChat.lead_status.replace(/_/g, ' ')}</span>
+                    {currentChatHeader.lead_phone}
+                    {currentChatHeader.lead_status && (
+                      <span className="wa-status-pill">{currentChatHeader.lead_status.replace(/_/g, ' ')}</span>
                     )}
                   </div>
                 </div>
@@ -417,10 +428,10 @@ export default function WhatsAppInbox() {
       {showStartChatModal && (
         <StartChatModal
           onClose={() => setShowStartChatModal(false)}
-          onChatReady={async (leadId) => {
+          onChatReady={async (leadId, leadData) => {
             setShowStartChatModal(false);
             await loadChats();
-            handleSelectChat(leadId);
+            handleSelectChat(leadId, leadData);
           }}
         />
       )}

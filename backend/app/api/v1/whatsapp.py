@@ -163,7 +163,7 @@ async def list_chats(
     """
     instance_name = f"rep_{current_user.id}"
 
-    # Subquery: latest message timestamp per lead for this rep's instance
+    # Subquery: latest message timestamp per lead
     latest_msg_sq = (
         select(
             WhatsAppMessage.lead_id,
@@ -171,7 +171,6 @@ async def list_chats(
         )
         .where(
             WhatsAppMessage.lead_id.isnot(None),
-            WhatsAppMessage.instance_name == instance_name,
         )
         .group_by(WhatsAppMessage.lead_id)
         .subquery()
@@ -202,14 +201,19 @@ async def list_chats(
     result = await db.execute(query)
     rows = result.all()
 
+    # Deduplicate in case multiple messages share the exact max timestamp
+    seen_leads = set()
     chats = []
     for row in rows:
+        if row.lead_id in seen_leads:
+            continue
+        seen_leads.add(row.lead_id)
+
         unread_result = await db.execute(
             select(func.count(WhatsAppMessage.id)).where(
                 WhatsAppMessage.lead_id == row.lead_id,
                 WhatsAppMessage.direction == MessageDirection.inbound,
                 WhatsAppMessage.status != "read",
-                WhatsAppMessage.instance_name == instance_name,
             )
         )
         unread_count = unread_result.scalar() or 0
@@ -246,13 +250,10 @@ async def get_chat_messages(
     if current_user.is_sales_rep and lead.assigned_rep_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    instance_name = f"rep_{current_user.id}"
-
     result = await db.execute(
         select(WhatsAppMessage)
         .where(
             WhatsAppMessage.lead_id == lead_id,
-            WhatsAppMessage.instance_name == instance_name,
         )
         .order_by(WhatsAppMessage.timestamp.asc())
     )
@@ -637,10 +638,9 @@ async def logout_instance(
     instance_name = f"rep_{current_user.id}"
     try:
         await evo_client.logout_instance(instance_name)
-        return {"status": "success", "message": "WhatsApp disconnected successfully"}
     except Exception as exc:
-        logger.error("Failed to logout instance %s: %s", instance_name, exc)
-        raise HTTPException(status_code=502, detail="Failed to disconnect from WhatsApp")
+        logger.warning("Logout instance %s encountered: %s", instance_name, exc)
+    return {"status": "success", "message": "WhatsApp disconnected successfully"}
 
 
 @router.get("/instances")

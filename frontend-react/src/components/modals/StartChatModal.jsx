@@ -60,9 +60,10 @@ export default function StartChatModal({ onClose, onChatReady }) {
       } else {
         toast(`No previous messages found with ${selectedLead.name} — starting fresh.`, { icon: 'ℹ️' });
       }
-      onChatReady(selectedLead.id);
+      onChatReady(selectedLead.id, selectedLead);
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to sync history');
+      onChatReady(selectedLead.id, selectedLead);
     } finally {
       setSyncing(false);
     }
@@ -70,17 +71,7 @@ export default function StartChatModal({ onClose, onChatReady }) {
 
   const handleStartFresh = async () => {
     if (!selectedLead) return;
-    setSyncing(true);
-    try {
-      // Calling syncChatHistory will force the backend to inject the initialisation message 
-      // if no history exists, ensuring the chat appears in the sidebar.
-      await syncChatHistory(selectedLead.id);
-      onChatReady(selectedLead.id);
-    } catch (err) {
-      toast.error('Failed to initialize chat');
-    } finally {
-      setSyncing(false);
-    }
+    onChatReady(selectedLead.id, selectedLead);
   };
 
   const statusColor = {

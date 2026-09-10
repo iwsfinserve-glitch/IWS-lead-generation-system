@@ -77,7 +77,27 @@ class EvolutionAPIClient:
                 },
             )
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+
+        # Ensure syncFullHistory is enabled for complete message history
+        try:
+            await self.set_instance_settings(instance_name, {"syncFullHistory": True})
+        except Exception as exc:
+            logger.debug("Failed to enable syncFullHistory on create for %s: %s", instance_name, exc)
+
+        return data
+
+    async def set_instance_settings(self, instance_name: str, settings_dict: dict) -> dict:
+        """Update settings for an Evolution instance (e.g. syncFullHistory)."""
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                self._url(f"/settings/set/{instance_name}"),
+                headers=self.headers,
+                json=settings_dict,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+        return {}
 
     async def get_instance_status(self, instance_name: str) -> dict:
         """Check the connection status of an instance."""
