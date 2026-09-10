@@ -22,6 +22,7 @@ Design principles (v2):
   phone matching — it accepts whatever it's given.
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
@@ -185,145 +186,174 @@ class EvolutionAPIClient:
                 return records
         return []
 
-    async def _fetch_by_number(
-        self,
-        instance_name: str,
-        number: str,
-        limit: int = 1000,
-    ) -> list[dict]:
-        """Fetch messages using Evolution API's built-in number filter.
-
-        This is the most reliable approach — server-side filtering by phone number.
-        Returns all messages (inbound + outbound) for that contact.
-        """
-        async with httpx.AsyncClient(timeout=30) as client:
-            try:
-                resp = await client.post(
-                    self._url(f"/chat/findMessages/{instance_name}"),
-                    headers=self.headers,
-                    json={"number": number, "limit": limit},
-                )
-                if resp.status_code == 200:
-                    records = self._parse_message_records(resp.json())
-                    logger.debug(
-                        "_fetch_by_number(%s, number=%s): %d records",
-                        instance_name, number, len(records),
-                    )
-                    return records
-            except Exception as exc:
-                logger.debug(
-                    "_fetch_by_number failed for %s (number=%s): %s",
-                    instance_name, number, exc,
-                )
-        return []
-
     async def _fetch_by_jid(
         self,
         instance_name: str,
         remote_jid: str,
-        limit: int = 1000,
+        limit: int = 50,
+        max_pages: int = 50,
+        client: Optional[httpx.AsyncClient] = None,
     ) -> list[dict]:
-        """Fetch messages using a specific WhatsApp JID (remoteJid filter).
+        """Fetch ALL messages for a specific WhatsApp JID with multi-page pagination.
 
-        Used as a supplementary strategy when the exact JID is known
-        (including @lid privacy-identifier JIDs).
+        Evolution API's findMessages endpoint caps pages at 50 records per page.
+        This method iterates through all available pages (1..pages) so that no
+        messages in the middle or beginning are missed.
         """
-        async with httpx.AsyncClient(timeout=30) as client:
+        all_records: list[dict] = []
+        seen_ids: set[str] = set()
+        page = 1
+
+        async def _do_fetch(c: httpx.AsyncClient):
+            nonlocal page
+            while page <= max_pages:
+                try:
+                    resp = await c.post(
+                        self._url(f"/chat/findMessages/{instance_name}"),
+                        headers=self.headers,
+                        json={
+                            "where": {"key": {"remoteJid": remote_jid}},
+                            "page": page,
+                            "limit": limit,
+                        },
+                    )
+                    if resp.status_code != 200:
+                        break
+
+                    data = resp.json()
+                    msg_meta = (
+                        data.get("messages", {})
+                        if isinstance(data.get("messages"), dict)
+                        else {}
+                    )
+                    records = (
+                        msg_meta.get("records", [])
+                        if isinstance(msg_meta.get("records"), list)
+                        else self._parse_message_records(data)
+                    )
+                    total_pages = msg_meta.get("pages", 1)
+
+                    if not records:
+                        break
+
+                    for rec in records:
+                        if not isinstance(rec, dict):
+                            continue
+                        key_d = rec.get("key") if isinstance(rec.get("key"), dict) else {}
+                        msg_id = key_d.get("id") or rec.get("id")
+                        if msg_id:
+                            if msg_id not in seen_ids:
+                                seen_ids.add(msg_id)
+                                all_records.append(rec)
+                        else:
+                            all_records.append(rec)
+
+                    if page >= total_pages:
+                        break
+                    page += 1
+                except Exception as exc:
+                    logger.debug(
+                        "_fetch_by_jid failed on page %d for %s (jid=%s): %s",
+                        page, instance_name, remote_jid, exc,
+                    )
+                    break
+
+        if client:
+            await _do_fetch(client)
+        else:
+            async with httpx.AsyncClient(timeout=30) as c:
+                await _do_fetch(c)
+
+        logger.debug(
+            "_fetch_by_jid(%s, jid=%s): fetched %d records across %d page(s)",
+            instance_name, remote_jid, len(all_records), page,
+        )
+        return all_records
+
+    async def find_contacts(
+        self,
+        instance_name: str,
+        client: Optional[httpx.AsyncClient] = None,
+    ) -> list[dict]:
+        """Fetch all contacts for an instance from Evolution API."""
+        async def _do_find(c: httpx.AsyncClient):
             try:
-                resp = await client.post(
-                    self._url(f"/chat/findMessages/{instance_name}"),
+                resp = await c.post(
+                    self._url(f"/chat/findContacts/{instance_name}"),
                     headers=self.headers,
-                    json={
-                        "where": {"key": {"remoteJid": remote_jid}},
-                        "limit": limit,
-                    },
+                    json={},
                 )
                 if resp.status_code == 200:
-                    records = self._parse_message_records(resp.json())
-                    logger.debug(
-                        "_fetch_by_jid(%s, jid=%s): %d records",
-                        instance_name, remote_jid, len(records),
-                    )
-                    return records
+                    data = resp.json()
+                    if isinstance(data, list):
+                        return data
+                    if isinstance(data, dict):
+                        return (
+                            data.get("records")
+                            or data.get("contacts")
+                            or data.get("data")
+                            or []
+                        )
             except Exception as exc:
-                logger.debug(
-                    "_fetch_by_jid failed for %s (jid=%s): %s",
-                    instance_name, remote_jid, exc,
-                )
-        return []
-
-    async def find_contacts(self, instance_name: str) -> list[dict]:
-        """Fetch all contacts for an instance from Evolution API."""
-        async with httpx.AsyncClient(timeout=20) as client:
-            for method in ["POST", "GET"]:
-                try:
-                    if method == "POST":
-                        resp = await client.post(
-                            self._url(f"/chat/findContacts/{instance_name}"),
-                            headers=self.headers,
-                            json={},
-                        )
-                    else:
-                        resp = await client.get(
-                            self._url(f"/chat/findContacts/{instance_name}"),
-                            headers=self.headers,
-                        )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if isinstance(data, list):
-                            return data
-                        if isinstance(data, dict):
-                            return (
-                                data.get("records")
-                                or data.get("contacts")
-                                or data.get("data")
-                                or []
-                            )
-                except Exception as exc:
-                    logger.debug("findContacts %s failed for %s: %s", method, instance_name, exc)
+                logger.debug("findContacts failed for %s: %s", instance_name, exc)
             return []
 
-    async def find_chats(self, instance_name: str) -> list[dict]:
+        if client:
+            return await _do_find(client)
+        async with httpx.AsyncClient(timeout=15) as c:
+            return await _do_find(c)
+
+    async def find_chats(
+        self,
+        instance_name: str,
+        client: Optional[httpx.AsyncClient] = None,
+    ) -> list[dict]:
         """Fetch all chats for an instance from Evolution API."""
-        async with httpx.AsyncClient(timeout=20) as client:
-            for method in ["POST", "GET"]:
-                try:
-                    if method == "POST":
-                        resp = await client.post(
-                            self._url(f"/chat/findChats/{instance_name}"),
-                            headers=self.headers,
-                            json={},
+        async def _do_find(c: httpx.AsyncClient):
+            try:
+                resp = await c.post(
+                    self._url(f"/chat/findChats/{instance_name}"),
+                    headers=self.headers,
+                    json={},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if isinstance(data, list):
+                        return data
+                    if isinstance(data, dict):
+                        return (
+                            data.get("records")
+                            or data.get("chats")
+                            or data.get("data")
+                            or []
                         )
-                    else:
-                        resp = await client.get(
-                            self._url(f"/chat/findChats/{instance_name}"),
-                            headers=self.headers,
-                        )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if isinstance(data, list):
-                            return data
-                        if isinstance(data, dict):
-                            return (
-                                data.get("records")
-                                or data.get("chats")
-                                or data.get("data")
-                                or []
-                            )
-                except Exception as exc:
-                    logger.debug("findChats %s failed for %s: %s", method, instance_name, exc)
+            except Exception as exc:
+                logger.debug("findChats failed for %s: %s", instance_name, exc)
             return []
 
-    async def _resolve_candidate_jids(self, instance_name: str, phone: str) -> list[str]:
-        """Resolve all candidate WhatsApp JIDs for a phone number.
+        if client:
+            return await _do_find(client)
+        async with httpx.AsyncClient(timeout=15) as c:
+            return await _do_find(c)
 
-        Builds the standard @s.whatsapp.net JIDs plus queries contacts/chats
-        to discover any @lid privacy-identifier JIDs for this contact.
-        Returns a deduplicated, ordered list of JIDs to try.
+    async def _resolve_candidate_jids(
+        self,
+        instances: list[str],
+        phone: str,
+        client: Optional[httpx.AsyncClient] = None,
+    ) -> list[str]:
+        """Resolve all candidate WhatsApp JIDs for a phone number across instances.
+
+        Builds standard @s.whatsapp.net JIDs plus deep-queries contacts and active
+        chats (including nested lastMessage fields and @lid privacy identifiers)
+        to discover every WhatsApp identifier linked to this phone number.
         """
         digits = re.sub(r"\D", "", str(phone or ""))
         if not digits:
             return []
+
+        last10 = digits[-10:] if len(digits) >= 10 else digits
+        clean_12 = f"91{last10}" if len(last10) == 10 else digits
 
         candidates: list[str] = []
         seen: set[str] = set()
@@ -332,70 +362,85 @@ class EvolutionAPIClient:
             if not jid or not isinstance(jid, str):
                 return
             jid = jid.strip()
-            if not jid or "@g.us" in jid or "@broadcast" in jid:
+            if not jid or "@g.us" in jid or "@broadcast" in jid or "@newsletter" in jid:
                 return
             if jid not in seen:
                 seen.add(jid)
                 candidates.append(jid)
 
         # Standard JID formats
-        clean_wa = _normalise_phone_for_wa(phone)
-        if clean_wa:
-            add(f"{clean_wa}@s.whatsapp.net")
-        if digits != clean_wa:
-            add(f"{digits}@s.whatsapp.net")
-        if len(digits) == 10:
-            add(f"91{digits}@s.whatsapp.net")
-        elif digits.startswith("91") and len(digits) > 10:
-            add(f"{digits[2:]}@s.whatsapp.net")
+        add(f"{clean_12}@s.whatsapp.net")
+        add(f"{digits}@s.whatsapp.net")
+        if last10 != digits:
+            add(f"{last10}@s.whatsapp.net")
 
-        last10 = digits[-10:] if len(digits) >= 10 else digits
+        async def _check_instance(inst: str, c: httpx.AsyncClient):
+            inst_candidates = []
+            # Check contacts
+            try:
+                contacts = await self.find_contacts(inst, client=c)
+                for cont in contacts:
+                    if not isinstance(cont, dict):
+                        continue
+                    c_id = str(cont.get("id") or "")
+                    c_jid = str(cont.get("remoteJid") or "")
+                    c_lid = str(cont.get("lid") or "")
+                    c_alt = str(cont.get("remoteJidAlt") or "")
+                    c_num = str(cont.get("number") or cont.get("phoneNumber") or "")
 
-        # Check contacts for @lid or alternative JIDs
-        try:
-            contacts = await self.find_contacts(instance_name)
-            for c in contacts:
-                if not isinstance(c, dict):
-                    continue
-                c_id = str(c.get("id") or "")
-                c_jid = str(c.get("remoteJid") or "")
-                c_lid = str(c.get("lid") or "")
-                c_alt = str(c.get("remoteJidAlt") or "")
-                c_num = str(c.get("number") or c.get("phoneNumber") or "")
+                    if (
+                        (last10 and (last10 in c_id or last10 in c_jid or last10 in c_num or last10 in c_alt or last10 in c_lid))
+                        or (digits and (digits in c_id or digits in c_jid or digits in c_num or digits in c_alt or digits in c_lid))
+                    ):
+                        for jid_candidate in [c_lid, c_jid, c_alt, c_id]:
+                            if jid_candidate:
+                                inst_candidates.append(jid_candidate)
+            except Exception as exc:
+                logger.debug("_resolve_candidate_jids contacts check failed for %s: %s", inst, exc)
 
-                if not (
-                    (last10 and (last10 in c_id or last10 in c_jid or last10 in c_num))
-                    or (digits and (digits in c_id or digits in c_jid or digits in c_num))
-                ):
-                    continue
+            # Check active chats (including lastMessage keys)
+            try:
+                chats = await self.find_chats(inst, client=c)
+                for ch in chats:
+                    if not isinstance(ch, dict):
+                        continue
+                    ch_id = str(ch.get("id") or "")
+                    ch_jid = str(ch.get("remoteJid") or "")
+                    ch_lid = str(ch.get("lid") or "")
+                    ch_phone = str(ch.get("phone") or "")
 
-                # Prefer @lid first (most specific), then standard JIDs
-                for jid_candidate in [c_lid, c_jid, c_id, c_alt]:
-                    add(jid_candidate)
-        except Exception as exc:
-            logger.debug("_resolve_candidate_jids contacts check failed: %s", exc)
+                    lm = ch.get("lastMessage") if isinstance(ch.get("lastMessage"), dict) else {}
+                    lm_key = lm.get("key") if isinstance(lm.get("key"), dict) else {}
+                    lm_alt = str(lm_key.get("remoteJidAlt") or lm_key.get("participantAlt") or "")
+                    lm_rjid = str(lm_key.get("remoteJid") or "")
+                    lm_part = str(lm_key.get("participant") or "")
 
-        # Also check active chats
-        try:
-            chats = await self.find_chats(instance_name)
-            for ch in chats:
-                if not isinstance(ch, dict):
-                    continue
-                ch_id = str(ch.get("id") or "")
-                ch_jid = str(ch.get("remoteJid") or "")
-                ch_lid = str(ch.get("lid") or "")
-                ch_phone = str(ch.get("phone") or "")
+                    match = (
+                        (last10 and (last10 in ch_id or last10 in ch_jid or last10 in ch_phone or last10 in lm_alt or last10 in lm_rjid or last10 in lm_part))
+                        or (digits and (digits in ch_id or digits in ch_jid or digits in ch_phone or digits in lm_alt or digits in lm_rjid or digits in lm_part))
+                    )
+                    if match:
+                        for jid_candidate in [ch_lid, ch_jid, lm_rjid, lm_alt, lm_part, ch_id]:
+                            if jid_candidate:
+                                inst_candidates.append(jid_candidate)
+            except Exception as exc:
+                logger.debug("_resolve_candidate_jids chats check failed for %s: %s", inst, exc)
 
-                if not (
-                    (last10 and (last10 in ch_id or last10 in ch_jid or last10 in ch_phone))
-                    or (digits and (digits in ch_id or digits in ch_jid or digits in ch_phone))
-                ):
-                    continue
+            return inst_candidates
 
-                for jid_candidate in [ch_lid, ch_jid, ch_id]:
-                    add(jid_candidate)
-        except Exception as exc:
-            logger.debug("_resolve_candidate_jids chats check failed: %s", exc)
+        async def _run_checks(c: httpx.AsyncClient):
+            if instances:
+                gathered = await asyncio.gather(*[_check_instance(inst, c) for inst in instances], return_exceptions=True)
+                for inst_list in gathered:
+                    if isinstance(inst_list, list):
+                        for j in inst_list:
+                            add(j)
+
+        if client:
+            await _run_checks(client)
+        else:
+            async with httpx.AsyncClient(timeout=15) as c:
+                await _run_checks(c)
 
         return candidates
 
@@ -405,78 +450,86 @@ class EvolutionAPIClient:
         phone: str,
         limit: int = 1000,
     ) -> list[dict]:
-        """Fetch the complete conversation history for a phone number.
+        """Fetch the complete conversation history for a phone number across active instances.
 
         Returns ALL messages — old and new, inbound and outbound — for this
         contact from Evolution API's local database. Deduplication by
         whatsapp_msg_id is the caller's responsibility.
 
-        Strategy:
-        1. Primary: number-param filter (confirmed working, server-side filter).
-           Tries the 12-digit (with country code) and 10-digit variants.
-        2. Supplementary: JID-targeted queries for each resolved JID.
-           Catches @lid contacts and any JID the number-filter missed.
-
-        All results are merged and deduplicated by message ID before returning.
+        Features:
+        - Multi-page pagination: fetches all pages (not capped at 50).
+        - Privacy identifier resolution: resolves and queries @lid JIDs.
+        - Multi-instance discovery: queries candidate instances so messages
+          are never lost if the lead's history was on another connected session.
         """
         digits = re.sub(r"\D", "", str(phone or ""))
         if not digits:
             return []
 
-        suffix10 = digits[-10:] if len(digits) >= 10 else digits
-        clean_12 = f"91{suffix10}" if len(suffix10) == 10 else digits
+        async with httpx.AsyncClient(timeout=30) as client:
+            # Find active open instances to query
+            instances_to_check: list[str] = []
+            try:
+                inst_resp = await client.get(self._url("/instance/fetchInstances"), headers=self.headers)
+                if inst_resp.status_code == 200:
+                    all_inst = inst_resp.json()
+                    open_names = [
+                        inst_obj.get("name")
+                        for inst_obj in all_inst
+                        if isinstance(inst_obj, dict) and inst_obj.get("connectionStatus") == "open" and inst_obj.get("name")
+                    ]
+                    if instance_name and instance_name in open_names:
+                        instances_to_check.append(instance_name)
+                    for iname in open_names:
+                        if iname not in instances_to_check:
+                            instances_to_check.append(iname)
+            except Exception as exc:
+                logger.debug("Could not fetch instance list for message sync: %s", exc)
 
-        # Collect all records, dedup by message ID
-        all_records: dict[str, dict] = {}  # msg_id → record
+            if not instances_to_check:
+                instances_to_check = [instance_name] if instance_name else []
 
-        def merge(records: list[dict]):
-            for rec in records:
-                if not isinstance(rec, dict):
-                    continue
-                key_d = rec.get("key", {}) if isinstance(rec.get("key"), dict) else {}
-                msg_id = key_d.get("id") or rec.get("id")
-                if msg_id:
-                    if msg_id not in all_records:
-                        all_records[msg_id] = rec
-                else:
-                    # No ID — use a synthetic key to avoid dropping the record
-                    ts = rec.get("messageTimestamp") or rec.get("timestamp") or "0"
-                    synthetic = f"__no_id_{ts}_{len(all_records)}"
-                    all_records[synthetic] = rec
+            # Resolve all candidate JIDs across available instances
+            candidate_jids = await self._resolve_candidate_jids(instances_to_check, phone, client=client)
+            logger.info(
+                "fetch_messages_for_contact: resolved candidate JIDs for phone=%s: %s across instances %s",
+                phone, candidate_jids, instances_to_check,
+            )
 
-        # ── Strategy 1: number-param fetch (primary) ──────────────────
-        for number in dict.fromkeys([clean_12, suffix10, digits]):
-            if not number:
-                continue
-            records = await self._fetch_by_number(instance_name, number, limit=limit)
-            before = len(all_records)
-            merge(records)
-            added = len(all_records) - before
-            if added:
-                logger.info(
-                    "fetch_messages_for_contact: number=%s contributed %d records for phone=%s",
-                    number, added, phone,
-                )
+            all_records: dict[str, dict] = {}
 
-        # ── Strategy 2: JID-targeted queries (supplementary) ─────────
-        candidate_jids = await self._resolve_candidate_jids(instance_name, phone)
-        for jid in candidate_jids:
-            records = await self._fetch_by_jid(instance_name, jid, limit=limit)
-            before = len(all_records)
-            merge(records)
-            added = len(all_records) - before
-            if added:
-                logger.info(
-                    "fetch_messages_for_contact: jid=%s contributed %d new records for phone=%s",
-                    jid, added, phone,
-                )
+            def merge(records: list[dict]):
+                for rec in records:
+                    if not isinstance(rec, dict):
+                        continue
+                    key_d = rec.get("key", {}) if isinstance(rec.get("key"), dict) else {}
+                    msg_id = key_d.get("id") or rec.get("id")
+                    if msg_id:
+                        if msg_id not in all_records:
+                            all_records[msg_id] = rec
+                    else:
+                        ts = rec.get("messageTimestamp") or rec.get("timestamp") or "0"
+                        synthetic = f"__no_id_{ts}_{len(all_records)}"
+                        all_records[synthetic] = rec
 
-        result = list(all_records.values())
-        logger.info(
-            "fetch_messages_for_contact: TOTAL %d records for phone=%s (instance=%s)",
-            len(result), phone, instance_name,
-        )
-        return result
+            # Query candidate JIDs in parallel across candidate instances
+            fetch_tasks = [
+                self._fetch_by_jid(inst, jid, limit=50, max_pages=50, client=client)
+                for inst in instances_to_check
+                for jid in candidate_jids
+            ]
+            if fetch_tasks:
+                fetched_results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+                for res in fetched_results:
+                    if isinstance(res, list):
+                        merge(res)
+
+            result = list(all_records.values())
+            logger.info(
+                "fetch_messages_for_contact: TOTAL %d records for phone=%s",
+                len(result), phone,
+            )
+            return result
 
 
 # Singleton — imported as `from app.services.whatsapp import evo_client`
@@ -676,13 +729,12 @@ async def upsert_message(
         status=status,
         timestamp=timestamp or datetime.now(timezone.utc),
     )
-    db.add(msg)
-
     try:
-        await db.flush()  # Flush to catch unique constraint violations early
+        async with db.begin_nested():
+            db.add(msg)
+            await db.flush()
     except IntegrityError:
         # Race condition: another request inserted the same message_id concurrently
-        await db.rollback()
         existing = await db.execute(
             select(WhatsAppMessage).where(
                 WhatsAppMessage.whatsapp_msg_id == whatsapp_msg_id

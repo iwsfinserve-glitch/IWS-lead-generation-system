@@ -396,16 +396,16 @@ async def sync_chat_history(
             "message": "No conversation history found in WhatsApp for this number.",
         }
 
-    # ── Upsert each message — skip existing, insert new ───────────────
-    imported = 0
-    already_synced = 0
+    # ── Parse and batch deduplicate messages against DB ────────────────
+    parsed_items = []
+    candidate_ids = []
 
     for raw in raw_messages:
         key_d = raw.get("key", {}) if isinstance(raw.get("key"), dict) else {}
 
         # Skip group messages
         jid = str(key_d.get("remoteJid") or raw.get("remoteJid") or "")
-        if "@g.us" in jid or "@broadcast" in jid:
+        if "@g.us" in jid or "@broadcast" in jid or "@newsletter" in jid:
             continue
 
         wa_msg_id = key_d.get("id") or raw.get("id")
@@ -414,35 +414,67 @@ async def sync_chat_history(
         )
 
         content, media_type = extract_content_and_media(raw.get("message"), raw)
-
-        # Build a stable fallback ID for messages with no WA ID
         ts = extract_timestamp(raw)
         if not wa_msg_id:
             wa_msg_id = f"sync_{lead_id}_{int(ts.timestamp())}_{1 if from_me else 0}"
 
+        wa_msg_id_str = str(wa_msg_id)
+        candidate_ids.append(wa_msg_id_str)
+        parsed_items.append({
+            "wa_msg_id": wa_msg_id_str,
+            "from_me": from_me,
+            "content": content if content else None,
+            "media_type": media_type,
+            "ts": ts,
+        })
+
+    # Batch query existing message IDs in DB in a single SQL roundtrip
+    existing_ids = set()
+    if candidate_ids:
+        # Query in chunks of 500 to avoid query size limits
+        chunk_size = 500
+        for i in range(0, len(candidate_ids), chunk_size):
+            chunk = candidate_ids[i:i + chunk_size]
+            res = await db.execute(
+                select(WhatsAppMessage.whatsapp_msg_id).where(
+                    WhatsAppMessage.whatsapp_msg_id.in_(chunk)
+                )
+            )
+            for row in res.scalars().all():
+                if row:
+                    existing_ids.add(str(row))
+
+    imported = 0
+    already_synced = 0
+    seen_in_batch = set()
+
+    for item in parsed_items:
+        msg_id = item["wa_msg_id"]
+        if msg_id in existing_ids or msg_id in seen_in_batch:
+            already_synced += 1
+            continue
+
+        seen_in_batch.add(msg_id)
+        from_me = item["from_me"]
         direction = MessageDirection.outbound if from_me else MessageDirection.inbound
         sender = instance_name if from_me else clean_phone
         receiver = clean_phone if from_me else instance_name
 
-        _msg, is_new = await upsert_message(
-            db,
+        msg = WhatsAppMessage(
             lead_id=lead_id,
             user_id=user_id,
+            whatsapp_msg_id=msg_id,
             instance_name=instance_name,
             sender_phone=sender,
             receiver_phone=receiver,
             direction=direction,
-            content=content if content else None,
-            whatsapp_msg_id=str(wa_msg_id),
-            media_type=media_type,
+            content=item["content"],
+            media_type=item["media_type"],
             status=MessageStatus.delivered,
-            timestamp=ts,
+            timestamp=item["ts"],
         )
-
-        if is_new:
-            imported += 1
-        else:
-            already_synced += 1
+        db.add(msg)
+        imported += 1
 
     await db.commit()
 
