@@ -3,20 +3,30 @@ WhatsApp Service — Evolution API client and message processing logic.
 
 Handles:
 1. HTTP communication with the self-hosted Evolution API instance.
-2. Incoming message processing (phone→lead matching, DB persistence, timeline logging).
+2. Incoming message processing (webhook → upsert to DB → timeline/notification).
 3. Outbound message sending via Evolution API.
+4. History sync: fetch ALL messages for a contact from Evolution API and
+   upsert only the ones that are not already in the DB (additive, never wipes).
 
-The Evolution API runs as a sibling Railway service and exposes a REST API
-authenticated by a global API key.
+Design principles (v3):
+- upsert_message() is the SINGLE canonical save path for all WhatsApp messages.
+- Sync is ADDITIVE: fetches everything from Evolution API, inserts only what's
+  missing from our DB. No DELETE ever happens during sync.
+- upsert_message() uses SQLAlchemy savepoints (begin_nested) instead of a full
+  session rollback — so a duplicate-key IntegrityError on message N never wipes
+  messages 1..(N-1) that were already added in the same batch.
+- lead_id / user_id are resolved by the caller; upsert_message() accepts whatever
+  it's given and saves regardless (no lead-match guard).
 """
 
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Tuple
 
 import httpx
-from sqlalchemy import select, func, case
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -33,10 +43,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════════
 
 class EvolutionAPIClient:
-    """Thin wrapper around the Evolution API REST endpoints.
-
-    All methods are async and use httpx for non-blocking HTTP calls.
-    """
+    """Thin wrapper around the Evolution API REST endpoints."""
 
     def __init__(self):
         url = (settings.EVOLUTION_API_URL or "").strip().rstrip("/")
@@ -49,11 +56,10 @@ class EvolutionAPIClient:
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
 
-    async def create_instance(self, instance_name: str) -> dict:
-        """Create a new WhatsApp Web session instance.
+    # ── Instance Management ────────────────────────────────────────────
 
-        Returns the instance details including connection status.
-        """
+    async def create_instance(self, instance_name: str) -> dict:
+        """Create a new WhatsApp Web session instance."""
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 self._url("/instance/create"),
@@ -78,7 +84,7 @@ class EvolutionAPIClient:
             return resp.json()
 
     async def get_qr_code(self, instance_name: str) -> dict:
-        """Fetch the QR code for an instance that's waiting for scan."""
+        """Fetch the QR code for an instance waiting for scan."""
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 self._url(f"/instance/connect/{instance_name}"),
@@ -87,38 +93,22 @@ class EvolutionAPIClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def send_text_message(self, instance_name: str, phone: str, text: str) -> dict:
-        """Send a text message via the connected WhatsApp instance.
-
-        Args:
-            instance_name: The Evolution API session name.
-            phone: Recipient phone in international format (e.g. '919876543210').
-            text: Message text content.
-        """
-        # Normalise phone: strip +, spaces, dashes
-        clean_phone = phone.replace("+", "").replace(" ", "").replace("-", "")
-
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                self._url(f"/message/sendText/{instance_name}"),
-                headers=self.headers,
-                json={
-                    "number": clean_phone,
-                    "text": text,
-                },
-            )
-            resp.raise_for_status()
-            return resp.json()
-
     async def logout_instance(self, instance_name: str) -> dict:
-        """Disconnect (logout) an instance without deleting it."""
+        """Disconnect (logout) an instance without deleting it.
+
+        Evolution API often returns 4xx/5xx even on a successful logout
+        (e.g. 400 if already disconnected, 404 if session not found).
+        We treat any response as success since the intent is achieved.
+        """
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.delete(
                 self._url(f"/instance/logout/{instance_name}"),
                 headers=self.headers,
             )
-            resp.raise_for_status()
-            return resp.json()
+            try:
+                return resp.json()
+            except Exception:
+                return {"status": "disconnected", "http_status": resp.status_code}
 
     async def list_instances(self) -> list[dict]:
         """List all registered instances."""
@@ -130,8 +120,24 @@ class EvolutionAPIClient:
             resp.raise_for_status()
             return resp.json()
 
+    # ── Messaging ──────────────────────────────────────────────────────
+
+    async def send_text_message(self, instance_name: str, phone: str, text: str) -> dict:
+        """Send a text message via the connected WhatsApp instance."""
+        clean_phone = phone.replace("+", "").replace(" ", "").replace("-", "")
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                self._url(f"/message/sendText/{instance_name}"),
+                headers=self.headers,
+                json={"number": clean_phone, "text": text},
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    # ── Message Fetching ───────────────────────────────────────────────
+
     def _parse_message_records(self, data) -> list[dict]:
-        """Parse Evolution API findMessages response into a flat list of message records."""
+        """Parse Evolution API findMessages response into a flat list of records."""
         if isinstance(data, list):
             return data
         if isinstance(data, dict):
@@ -144,129 +150,176 @@ class EvolutionAPIClient:
                 return records
         return []
 
+    async def _fetch_by_number(
+        self, instance_name: str, number: str, limit: int = 1000
+    ) -> list[dict]:
+        """Fetch messages using Evolution API's number filter (server-side)."""
+        async with httpx.AsyncClient(timeout=60) as client:
+            try:
+                resp = await client.post(
+                    self._url(f"/chat/findMessages/{instance_name}"),
+                    headers=self.headers,
+                    json={"number": number, "limit": limit},
+                )
+                if resp.status_code == 200:
+                    records = self._parse_message_records(resp.json())
+                    logger.debug(
+                        "_fetch_by_number(%s, number=%s): %d records",
+                        instance_name, number, len(records),
+                    )
+                    return records
+            except Exception as exc:
+                logger.debug(
+                    "_fetch_by_number failed (%s, number=%s): %s",
+                    instance_name, number, exc,
+                )
+        return []
+
+    async def _fetch_by_jid(
+        self, instance_name: str, remote_jid: str, limit: int = 1000
+    ) -> list[dict]:
+        """Fetch messages using an exact WhatsApp JID (remoteJid filter)."""
+        async with httpx.AsyncClient(timeout=60) as client:
+            try:
+                resp = await client.post(
+                    self._url(f"/chat/findMessages/{instance_name}"),
+                    headers=self.headers,
+                    json={
+                        "where": {"key": {"remoteJid": remote_jid}},
+                        "limit": limit,
+                    },
+                )
+                if resp.status_code == 200:
+                    records = self._parse_message_records(resp.json())
+                    logger.debug(
+                        "_fetch_by_jid(%s, jid=%s): %d records",
+                        instance_name, remote_jid, len(records),
+                    )
+                    return records
+            except Exception as exc:
+                logger.debug(
+                    "_fetch_by_jid failed (%s, jid=%s): %s",
+                    instance_name, remote_jid, exc,
+                )
+        return []
+
+    async def _fetch_broad(self, instance_name: str, limit: int = 2000) -> list[dict]:
+        """Broad fetch — returns the N most recent messages across all chats.
+
+        Used as a fallback when number/JID specific queries return nothing.
+        Caller is responsible for filtering by phone.
+        """
+        async with httpx.AsyncClient(timeout=90) as client:
+            try:
+                resp = await client.post(
+                    self._url(f"/chat/findMessages/{instance_name}"),
+                    headers=self.headers,
+                    json={"limit": limit},
+                )
+                if resp.status_code == 200:
+                    records = self._parse_message_records(resp.json())
+                    logger.info(
+                        "_fetch_broad(%s, limit=%d): %d records",
+                        instance_name, limit, len(records),
+                    )
+                    return records
+            except Exception as exc:
+                logger.warning("_fetch_broad failed for %s: %s", instance_name, exc)
+        return []
+
     async def find_contacts(self, instance_name: str) -> list[dict]:
         """Fetch all contacts for an instance from Evolution API."""
         async with httpx.AsyncClient(timeout=20) as client:
-            try:
-                resp = await client.post(
-                    self._url(f"/chat/findContacts/{instance_name}"),
-                    headers=self.headers,
-                    json={},
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data, list):
-                        return data
-                    if isinstance(data, dict):
-                        return (
-                            data.get("records")
-                            or data.get("contacts")
-                            or data.get("data")
-                            or []
+            for method in ["POST", "GET"]:
+                try:
+                    if method == "POST":
+                        resp = await client.post(
+                            self._url(f"/chat/findContacts/{instance_name}"),
+                            headers=self.headers,
+                            json={},
                         )
-            except Exception as exc:
-                logger.debug("findContacts POST failed for %s: %s", instance_name, exc)
-
-            try:
-                resp = await client.get(
-                    self._url(f"/chat/findContacts/{instance_name}"),
-                    headers=self.headers,
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data, list):
-                        return data
-                    if isinstance(data, dict):
-                        return (
-                            data.get("records")
-                            or data.get("contacts")
-                            or data.get("data")
-                            or []
+                    else:
+                        resp = await client.get(
+                            self._url(f"/chat/findContacts/{instance_name}"),
+                            headers=self.headers,
                         )
-            except Exception as exc:
-                logger.debug("findContacts GET failed for %s: %s", instance_name, exc)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if isinstance(data, list):
+                            return data
+                        if isinstance(data, dict):
+                            return (
+                                data.get("records")
+                                or data.get("contacts")
+                                or data.get("data")
+                                or []
+                            )
+                except Exception as exc:
+                    logger.debug("findContacts %s failed for %s: %s", method, instance_name, exc)
             return []
 
     async def find_chats(self, instance_name: str) -> list[dict]:
         """Fetch all chats for an instance from Evolution API."""
         async with httpx.AsyncClient(timeout=20) as client:
-            try:
-                resp = await client.post(
-                    self._url(f"/chat/findChats/{instance_name}"),
-                    headers=self.headers,
-                    json={},
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data, list):
-                        return data
-                    if isinstance(data, dict):
-                        return (
-                            data.get("records")
-                            or data.get("chats")
-                            or data.get("data")
-                            or []
+            for method in ["POST", "GET"]:
+                try:
+                    if method == "POST":
+                        resp = await client.post(
+                            self._url(f"/chat/findChats/{instance_name}"),
+                            headers=self.headers,
+                            json={},
                         )
-            except Exception as exc:
-                logger.debug("findChats POST failed for %s: %s", instance_name, exc)
-
-            try:
-                resp = await client.get(
-                    self._url(f"/chat/findChats/{instance_name}"),
-                    headers=self.headers,
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data, list):
-                        return data
-                    if isinstance(data, dict):
-                        return (
-                            data.get("records")
-                            or data.get("chats")
-                            or data.get("data")
-                            or []
+                    else:
+                        resp = await client.get(
+                            self._url(f"/chat/findChats/{instance_name}"),
+                            headers=self.headers,
                         )
-            except Exception as exc:
-                logger.debug("findChats GET failed for %s: %s", instance_name, exc)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if isinstance(data, list):
+                            return data
+                        if isinstance(data, dict):
+                            return (
+                                data.get("records")
+                                or data.get("chats")
+                                or data.get("data")
+                                or []
+                            )
+                except Exception as exc:
+                    logger.debug("findChats %s failed for %s: %s", method, instance_name, exc)
             return []
 
-    async def resolve_jids_for_phone(self, instance_name: str, phone: str) -> list[str]:
-        """Resolve all candidate WhatsApp JIDs (including @lid format) for a phone number.
-
-        Queries Evolution API contacts and chats to discover if WhatsApp uses a privacy
-        @lid identifier or @s.whatsapp.net for this contact.
-        """
-        digits = "".join(c for c in (phone or "") if c.isdigit())
+    async def _resolve_candidate_jids(self, instance_name: str, phone: str) -> list[str]:
+        """Resolve all candidate WhatsApp JIDs for a phone number."""
+        digits = re.sub(r"\D", "", str(phone or ""))
         if not digits:
             return []
 
         candidates: list[str] = []
-        seen = set()
+        seen: set[str] = set()
 
-        def add_candidate(jid: str | None):
+        def add(jid: str | None):
             if not jid or not isinstance(jid, str):
                 return
             jid = jid.strip()
-            if not jid or "@g.us" in jid:  # Skip groups
+            if not jid or "@g.us" in jid or "@broadcast" in jid:
                 return
             if jid not in seen:
                 seen.add(jid)
                 candidates.append(jid)
 
-        last10 = digits[-10:] if len(digits) >= 10 else digits
-
-        # Standard formats to always include
         clean_wa = _normalise_phone_for_wa(phone)
         if clean_wa:
-            add_candidate(f"{clean_wa}@s.whatsapp.net")
+            add(f"{clean_wa}@s.whatsapp.net")
         if digits != clean_wa:
-            add_candidate(f"{digits}@s.whatsapp.net")
+            add(f"{digits}@s.whatsapp.net")
         if len(digits) == 10:
-            add_candidate(f"91{digits}@s.whatsapp.net")
+            add(f"91{digits}@s.whatsapp.net")
         elif digits.startswith("91") and len(digits) > 10:
-            add_candidate(f"{digits[2:]}@s.whatsapp.net")
+            add(f"{digits[2:]}@s.whatsapp.net")
 
-        # Query contacts from Evolution API to find matching @lid or custom JID
+        last10 = digits[-10:] if len(digits) >= 10 else digits
+
         try:
             contacts = await self.find_contacts(instance_name)
             for c in contacts:
@@ -274,33 +327,21 @@ class EvolutionAPIClient:
                     continue
                 c_id = str(c.get("id") or "")
                 c_jid = str(c.get("remoteJid") or "")
-                c_alt = str(c.get("remoteJidAlt") or "")
                 c_lid = str(c.get("lid") or "")
+                c_alt = str(c.get("remoteJidAlt") or "")
                 c_num = str(c.get("number") or c.get("phoneNumber") or "")
-                c_name = str(c.get("pushName") or c.get("name") or "")
 
-                is_match = (
-                    (last10 and (last10 in c_id or last10 in c_jid or last10 in c_num or last10 in c_name))
+                if not (
+                    (last10 and (last10 in c_id or last10 in c_jid or last10 in c_num))
                     or (digits and (digits in c_id or digits in c_jid or digits in c_num))
-                )
+                ):
+                    continue
 
-                if is_match:
-                    if c_lid and "@" in c_lid:
-                        add_candidate(c_lid)
-                    if "@lid" in c_jid:
-                        add_candidate(c_jid)
-                    if "@lid" in c_id:
-                        add_candidate(c_id)
-                    if c_alt and "@" in c_alt:
-                        add_candidate(c_alt)
-                    if c_jid and "@" in c_jid:
-                        add_candidate(c_jid)
-                    if c_id and "@" in c_id:
-                        add_candidate(c_id)
+                for jid_candidate in [c_lid, c_jid, c_id, c_alt]:
+                    add(jid_candidate)
         except Exception as exc:
-            logger.debug("Failed checking contacts for JID resolution: %s", exc)
+            logger.debug("_resolve_candidate_jids contacts failed: %s", exc)
 
-        # Also query findChats to find active chat sessions
         try:
             chats = await self.find_chats(instance_name)
             for ch in chats:
@@ -311,110 +352,35 @@ class EvolutionAPIClient:
                 ch_lid = str(ch.get("lid") or "")
                 ch_phone = str(ch.get("phone") or "")
 
-                is_match = (
+                if not (
                     (last10 and (last10 in ch_id or last10 in ch_jid or last10 in ch_phone))
                     or (digits and (digits in ch_id or digits in ch_jid or digits in ch_phone))
-                )
-                if is_match:
-                    if ch_lid and "@" in ch_lid:
-                        add_candidate(ch_lid)
-                    if "@lid" in ch_jid:
-                        add_candidate(ch_jid)
-                    if "@lid" in ch_id:
-                        add_candidate(ch_id)
-                    if ch_jid and "@" in ch_jid:
-                        add_candidate(ch_jid)
-                    if ch_id and "@" in ch_id:
-                        add_candidate(ch_id)
+                ):
+                    continue
+
+                for jid_candidate in [ch_lid, ch_jid, ch_id]:
+                    add(jid_candidate)
         except Exception as exc:
-            logger.debug("Failed checking chats for JID resolution: %s", exc)
+            logger.debug("_resolve_candidate_jids chats failed: %s", exc)
 
         return candidates
 
-    async def fetch_messages_by_number(
+    async def fetch_messages_for_contact(
         self,
         instance_name: str,
-        number: str,
+        phone: str,
         limit: int = 1000,
     ) -> list[dict]:
-        """Fetch messages by phone number using Evolution API's built-in number filter.
+        """Fetch the complete conversation history for a phone number.
 
-        This is the most reliable approach — Evolution API filters server-side.
-        Confirmed working via test_group_match.py scratch tests.
-        """
-        async with httpx.AsyncClient(timeout=30) as client:
-            try:
-                resp = await client.post(
-                    self._url(f"/chat/findMessages/{instance_name}"),
-                    headers=self.headers,
-                    json={"number": number, "limit": limit},
-                )
-                if resp.status_code == 200:
-                    return self._parse_message_records(resp.json())
-            except Exception as exc:
-                logger.debug("fetch_messages_by_number failed for %s (number=%s): %s", instance_name, number, exc)
-        return []
+        Returns ALL messages — old and new, inbound and outbound — for this
+        contact. Uses three strategies in order:
 
-    async def fetch_messages(
-        self,
-        instance_name: str,
-        remote_jid: str,
-        count: int = 100,
-    ) -> list[dict]:
-        """Fetch historical messages from Evolution API for a specific JID.
+        1. Number-param filter (server-side, most reliable when it works)
+        2. JID-targeted queries (handles @lid privacy identifiers)
+        3. Broad fetch + client-side phone filter (fallback — always works)
 
-        Uses where.key.remoteJid filter. Works best when the exact JID is known.
-        """
-        async with httpx.AsyncClient(timeout=30) as client:
-            try:
-                resp = await client.post(
-                    self._url(f"/chat/findMessages/{instance_name}"),
-                    headers=self.headers,
-                    json={
-                        "where": {"key": {"remoteJid": remote_jid}},
-                        "limit": count,
-                    },
-                )
-                if resp.status_code == 200:
-                    return self._parse_message_records(resp.json())
-            except Exception as exc:
-                logger.debug("fetch_messages by JID failed for %s (JID=%s): %s", instance_name, remote_jid, exc)
-        return []
-
-    async def _fetch_raw_messages(self, instance_name: str, limit: int = 2000) -> list[dict]:
-        """Fetch messages from an instance with no filter — returns the N most recent messages.
-
-        This is the approach confirmed working in scratch/test_fetch.py:
-            POST /chat/findMessages/{inst} with {"limit": N}
-        Returns all message types across all chats; caller must filter by phone.
-        """
-        async with httpx.AsyncClient(timeout=60) as client:
-            try:
-                resp = await client.post(
-                    self._url(f"/chat/findMessages/{instance_name}"),
-                    headers=self.headers,
-                    json={"limit": limit},
-                )
-                if resp.status_code == 200:
-                    records = self._parse_message_records(resp.json())
-                    logger.info("_fetch_raw_messages(%s, limit=%d): got %d records", instance_name, limit, len(records))
-                    return records
-                logger.warning("_fetch_raw_messages: HTTP %d for instance %s", resp.status_code, instance_name)
-            except Exception as exc:
-                logger.warning("_fetch_raw_messages failed for %s: %s", instance_name, exc)
-        return []
-
-    async def fetch_messages_for_contact(self, instance_name: str, phone: str) -> list[dict]:
-        """Fetch all historical messages for a specific phone number from Evolution API.
-
-        Approach (mirrors scratch/test_fetch.py which was confirmed working):
-        1. Broad fetch: GET all messages up to limit=2000, filter client-side by suffix10.
-        2. Supplementary: JID-based targeted queries (handles exact JID match).
-        3. Supplementary: number-param query (may or may not be supported by API version).
-
-        Client-side filter: checks suffix10 (last 10 digits of phone) against all JID
-        fields in the message. Handles both standard @s.whatsapp.net and @lid JIDs
-        by looking at remoteJidAlt / participantAlt for the real phone number.
+        All results are merged and deduplicated by message ID before returning.
         """
         digits = re.sub(r"\D", "", str(phone or ""))
         if not digits:
@@ -423,172 +389,150 @@ class EvolutionAPIClient:
         suffix10 = digits[-10:] if len(digits) >= 10 else digits
         clean_12 = f"91{suffix10}" if len(suffix10) == 10 else digits
 
-        seen_msg_ids: set = set()
-        matched: list[dict] = []
+        all_records: dict[str, dict] = {}
 
-        def is_contact_message(m: dict) -> bool:
-            """Check if this message belongs to the target phone contact.
-
-            Mirrors the logic in scratch/test_fetch.py:
-                p = extract_contact_phone_from_message(m)
-                if suffix10 in p or (len(p) >= 10 and p[-10:] == suffix10): match
-            Also checks raw JID fields directly for robustness.
-            """
-            if not isinstance(m, dict):
-                return False
-            key_d = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
-            # Skip groups always
-            jid = str(key_d.get("remoteJid") or m.get("remoteJid") or "")
-            if "@g.us" in jid or "@broadcast" in jid:
-                return False
-
-            # Primary: use extract_contact_phone_from_message (handles @lid via Alt fields)
-            p = extract_contact_phone_from_message(m)
-            if p:
-                if p == clean_12 or p == digits:
-                    return True
-                if len(p) >= 10 and p[-10:] == suffix10:
-                    return True
-                if len(suffix10) >= 10 and suffix10 in p:
-                    return True
-
-            # Fallback: check all JID fields directly for suffix10
-            for field in [
-                key_d.get("remoteJid"), key_d.get("remoteJidAlt"),
-                key_d.get("participant"), key_d.get("participantAlt"),
-                m.get("remoteJid"), m.get("remoteJidAlt"),
-            ]:
-                if not field:
+        def merge(records: list[dict]):
+            for rec in records:
+                if not isinstance(rec, dict):
                     continue
-                f_str = str(field)
-                if "@g.us" in f_str or "@broadcast" in f_str:
-                    continue
-                user = re.sub(r"\D", "", f_str.split("@")[0].split(":")[0])
-                if len(user) >= 10 and (user == clean_12 or user == digits or user[-10:] == suffix10):
-                    return True
-            return False
+                key_d = rec.get("key", {}) if isinstance(rec.get("key"), dict) else {}
+                msg_id = key_d.get("id") or rec.get("id")
+                if msg_id:
+                    if msg_id not in all_records:
+                        all_records[msg_id] = rec
+                else:
+                    synthetic = f"__no_id_{len(all_records)}"
+                    all_records[synthetic] = rec
 
-        def add_if_match(m: dict):
-            if not is_contact_message(m):
-                return
-            key_d = m.get("key", {}) if isinstance(m.get("key"), dict) else {}
-            wa_id = key_d.get("id") or m.get("id")
-            if wa_id and wa_id in seen_msg_ids:
-                return
-            if wa_id:
-                seen_msg_ids.add(wa_id)
-            matched.append(m)
+        # ── Strategy 1: number-param filter ──────────────────────────
+        for number in dict.fromkeys([clean_12, suffix10, digits]):
+            if not number:
+                continue
+            records = await self._fetch_by_number(instance_name, number, limit=limit)
+            before = len(all_records)
+            merge(records)
+            if len(all_records) > before:
+                logger.info(
+                    "fetch_messages_for_contact: number=%s → +%d records (phone=%s)",
+                    number, len(all_records) - before, phone,
+                )
 
-        # ── Strategy 1: Broad raw fetch (confirmed working in test_fetch.py) ──────
-        raw_all = await self._fetch_raw_messages(instance_name, limit=2000)
-        for m in raw_all:
-            add_if_match(m)
-        logger.info("fetch_messages_for_contact: broad fetch got %d raw, %d matched for phone=%s",
-                    len(raw_all), len(matched), phone)
-
-        # ── Strategy 2: JID-based targeted queries (supplementary) ───────────────
-        candidate_jids = await self.resolve_jids_for_phone(instance_name, phone)
+        # ── Strategy 2: JID-targeted queries ─────────────────────────
+        candidate_jids = await self._resolve_candidate_jids(instance_name, phone)
         for jid in candidate_jids:
-            records = await self.fetch_messages(instance_name, jid, count=1000)
-            before = len(matched)
-            for m in records:
-                add_if_match(m)
-            if len(matched) > before:
-                logger.info("JID=%s contributed %d new messages", jid, len(matched) - before)
+            records = await self._fetch_by_jid(instance_name, jid, limit=limit)
+            before = len(all_records)
+            merge(records)
+            if len(all_records) > before:
+                logger.info(
+                    "fetch_messages_for_contact: jid=%s → +%d records (phone=%s)",
+                    jid, len(all_records) - before, phone,
+                )
 
-        # ── Strategy 3: number-param query (may or may not work per API version) ──
-        candidate_numbers = list(dict.fromkeys(n for n in [clean_12, digits, suffix10] if n))
-        for num in candidate_numbers:
-            records = await self.fetch_messages_by_number(instance_name, num)
-            before = len(matched)
-            for m in records:
-                add_if_match(m)
-            if len(matched) > before:
-                logger.info("number=%s contributed %d new messages", num, len(matched) - before)
+        # ── Strategy 3: broad fallback (if 1+2 returned nothing) ─────
+        if not all_records:
+            logger.info(
+                "fetch_messages_for_contact: targeted queries returned 0 for phone=%s, "
+                "falling back to broad fetch + client-side filter",
+                phone,
+            )
+            raw_all = await self._fetch_broad(instance_name, limit=2000)
+            for rec in raw_all:
+                if not isinstance(rec, dict):
+                    continue
+                key_d = rec.get("key", {}) if isinstance(rec.get("key"), dict) else {}
+                jid = str(key_d.get("remoteJid") or rec.get("remoteJid") or "")
+                # Skip groups
+                if "@g.us" in jid or "@broadcast" in jid:
+                    continue
+                # Client-side match by last-10 digits
+                jid_digits = re.sub(r"\D", "", jid.split("@")[0].split(":")[0])
+                if not jid_digits:
+                    continue
+                if not (
+                    suffix10 in jid_digits
+                    or (len(jid_digits) >= 10 and jid_digits[-10:] == suffix10)
+                ):
+                    continue
+                msg_id = key_d.get("id") or rec.get("id")
+                if msg_id:
+                    if msg_id not in all_records:
+                        all_records[msg_id] = rec
+                else:
+                    all_records[f"__no_id_{len(all_records)}"] = rec
 
-        logger.info("fetch_messages_for_contact: FINAL %d messages for phone=%s", len(matched), phone)
-        return matched
+            if all_records:
+                logger.info(
+                    "fetch_messages_for_contact: broad fallback found %d records for phone=%s",
+                    len(all_records), phone,
+                )
+
+        result = list(all_records.values())
+        logger.info(
+            "fetch_messages_for_contact: TOTAL %d records for phone=%s (instance=%s)",
+            len(result), phone, instance_name,
+        )
+        return result
 
 
-# Singleton-ish — imported as `from app.services.whatsapp import evo_client`
+# Singleton — imported as `from app.services.whatsapp import evo_client`
 evo_client = EvolutionAPIClient()
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Phone Extraction Helper
+# Phone Normalisation Helpers
 # ═══════════════════════════════════════════════════════════════════════
 
-def extract_contact_phone_from_message(raw_msg: dict) -> str:
-    """Extract the contact's phone digits from an Evolution API message record.
-
-    Checks remoteJidAlt / participantAlt first (alternative JID fields that often
-    contain the real phone number when the main JID is an @lid privacy identifier),
-    then falls back to remoteJid and other fields.
-
-    Returns only digit strings of length >= 10 to avoid matching short IDs.
-    Skips group/broadcast JIDs.
-    """
-    if not isinstance(raw_msg, dict):
+def _normalise_phone(phone: str) -> str:
+    """Strip +, spaces, dashes from a phone number."""
+    if not phone:
         return ""
+    return phone.replace("+", "").replace(" ", "").replace("-", "").strip()
 
-    key = raw_msg.get("key", {}) if isinstance(raw_msg.get("key"), dict) else {}
-    candidates = [
-        key.get("remoteJidAlt"), key.get("participantAlt"),
-        raw_msg.get("remoteJidAlt"), raw_msg.get("participantAlt"),
-        key.get("remoteJid"), raw_msg.get("remoteJid"),
-        raw_msg.get("chatId"), raw_msg.get("from"), raw_msg.get("to"),
-    ]
 
-    # First pass: skip group/broadcast/@lid JIDs
-    for c in candidates:
-        if not c:
-            continue
-        c_str = str(c)
-        if "@g.us" in c_str or "@broadcast" in c_str or "@newsletter" in c_str or "@lid" in c_str:
-            continue
-        user_part = c_str.split("@")[0].split(":")[0]
-        digits = re.sub(r"\D", "", user_part)
-        if len(digits) >= 10:
-            return digits
-
-    # Second pass: accept non-group JIDs even if they don't have a long digit string
-    for c in candidates:
-        if c and "@g.us" not in str(c) and "@broadcast" not in str(c):
-            user_part = str(c).split("@")[0].split(":")[0]
-            digits = re.sub(r"\D", "", user_part)
-            if digits:
-                return digits
-    return ""
+def _normalise_phone_for_wa(phone: str) -> str:
+    """Strip non-digits and, if exactly 10 digits, prepend '91' (India)."""
+    clean = _normalise_phone(phone)
+    if len(clean) == 10 and clean.isdigit():
+        return f"91{clean}"
+    return clean
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Message Processing Helpers
+# Message Content / Timestamp Extraction
 # ═══════════════════════════════════════════════════════════════════════
 
-def extract_content_and_media(msg_obj: dict | None, top_level: dict | None = None) -> tuple[str, str | None]:
-    """Extract readable text content and media type from Evolution API message payload."""
+def extract_content_and_media(
+    msg_obj: dict | None,
+    top_level: dict | None = None,
+) -> tuple[str, str | None]:
+    """Extract readable text content and media type from an Evolution API message payload."""
     if not msg_obj and isinstance(top_level, dict):
         msg_obj = top_level.get("message") or top_level
 
     if not isinstance(msg_obj, dict):
         return "", None
 
-    # Unwrap ephemeral or viewOnce wrappers
-    if "ephemeralMessage" in msg_obj and isinstance(msg_obj["ephemeralMessage"], dict):
-        msg_obj = msg_obj["ephemeralMessage"].get("message", msg_obj["ephemeralMessage"])
-    if "viewOnceMessage" in msg_obj and isinstance(msg_obj["viewOnceMessage"], dict):
-        msg_obj = msg_obj["viewOnceMessage"].get("message", msg_obj["viewOnceMessage"])
-    if "viewOnceMessageV2" in msg_obj and isinstance(msg_obj["viewOnceMessageV2"], dict):
-        msg_obj = msg_obj["viewOnceMessageV2"].get("message", msg_obj["viewOnceMessageV2"])
-    if "documentWithCaptionMessage" in msg_obj and isinstance(msg_obj["documentWithCaptionMessage"], dict):
-        msg_obj = msg_obj["documentWithCaptionMessage"].get("message", msg_obj["documentWithCaptionMessage"])
+    for wrapper_key in (
+        "ephemeralMessage",
+        "viewOnceMessage",
+        "viewOnceMessageV2",
+        "documentWithCaptionMessage",
+    ):
+        if wrapper_key in msg_obj and isinstance(msg_obj[wrapper_key], dict):
+            inner = msg_obj[wrapper_key]
+            msg_obj = inner.get("message", inner)
 
     if not isinstance(msg_obj, dict):
         return "", None
 
     content = (
         msg_obj.get("conversation")
-        or (msg_obj.get("extendedTextMessage", {}) if isinstance(msg_obj.get("extendedTextMessage"), dict) else {}).get("text")
+        or (
+            (msg_obj.get("extendedTextMessage") or {}).get("text")
+            if isinstance(msg_obj.get("extendedTextMessage"), dict)
+            else None
+        )
         or ""
     )
 
@@ -611,12 +555,15 @@ def extract_content_and_media(msg_obj: dict | None, top_level: dict | None = Non
     elif "locationMessage" in msg_obj:
         media_type = "location"
         content = content or "[Location]"
+    elif "stickerMessage" in msg_obj:
+        media_type = "sticker"
+        content = content or "[Sticker]"
 
     return content, media_type
 
 
 def extract_timestamp(raw: dict) -> datetime:
-    """Parse timestamp from Evolution API message record."""
+    """Parse timestamp from an Evolution API message record."""
     raw_ts = raw.get("messageTimestamp") or raw.get("timestamp")
     if raw_ts:
         try:
@@ -626,40 +573,116 @@ def extract_timestamp(raw: dict) -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _normalise_phone(phone: str) -> str:
-    """Strip +, spaces, dashes from a phone number for comparison."""
-    if not phone: return ""
-    return phone.replace("+", "").replace(" ", "").replace("-", "").strip()
-
-def _normalise_phone_for_wa(phone: str) -> str:
-    """Strip chars, and if it's exactly 10 digits, prepend '91'."""
-    clean = _normalise_phone(phone)
-    if len(clean) == 10 and clean.isdigit():
-        return f"91{clean}"
-    return clean
+# ═══════════════════════════════════════════════════════════════════════
+# Lead Matching
+# ═══════════════════════════════════════════════════════════════════════
 
 async def match_lead_by_phone(db: AsyncSession, phone: str) -> Lead | None:
-    """Find a lead whose phone_number matches the given WhatsApp phone.
+    """Find a lead whose phone_number matches the given WhatsApp phone."""
+    from sqlalchemy import func, or_
 
-    Automatically handles cases where the CRM lead has a 10-digit number
-    but WhatsApp sends it with the 91 country code.
-    """
-    from sqlalchemy import or_
-    
     clean_wa = _normalise_phone_for_wa(phone)
-    clean_lead = func.replace(func.replace(func.replace(Lead.phone_number, "+", ""), " ", ""), "-", "")
-    
+    clean_lead = func.replace(
+        func.replace(func.replace(Lead.phone_number, "+", ""), " ", ""), "-", ""
+    )
+
     result = await db.execute(
         select(Lead).where(
             or_(
                 clean_lead == clean_wa,
                 func.concat("91", clean_lead) == clean_wa,
-                clean_lead == _normalise_phone(phone)
+                clean_lead == _normalise_phone(phone),
             )
         )
     )
     return result.scalar_one_or_none()
 
+
+# ═══════════════════════════════════════════════════════════════════════
+# Canonical Save Path: upsert_message()
+# ═══════════════════════════════════════════════════════════════════════
+
+async def upsert_message(
+    db: AsyncSession,
+    *,
+    lead_id: int | None,
+    user_id: int | None,
+    instance_name: str,
+    sender_phone: str,
+    receiver_phone: str,
+    direction: MessageDirection,
+    content: str | None,
+    whatsapp_msg_id: str | None,
+    media_type: str | None = None,
+    media_url: str | None = None,
+    status: MessageStatus = MessageStatus.delivered,
+    timestamp: datetime | None = None,
+) -> Tuple[WhatsAppMessage, bool]:
+    """Insert a WhatsApp message if it doesn't already exist; skip if it does.
+
+    This is the SINGLE canonical save path for all WhatsApp messages — both
+    the real-time webhook and the manual sync endpoint use this function.
+
+    IMPORTANT — transaction safety:
+    On IntegrityError (duplicate whatsapp_msg_id race condition), this function
+    uses a SQLAlchemy savepoint (begin_nested) so that only the failing INSERT
+    is rolled back. The outer transaction — and all other messages inserted in
+    the same batch — remains intact. This prevents a single duplicate from
+    wiping an entire sync batch.
+
+    Returns:
+        (WhatsAppMessage, is_new: bool)
+        is_new=True  → message was newly inserted
+        is_new=False → message already existed (no DB change)
+    """
+    # Fast-path: check existence first to avoid hitting the savepoint on every message
+    if whatsapp_msg_id:
+        existing = await db.execute(
+            select(WhatsAppMessage).where(
+                WhatsAppMessage.whatsapp_msg_id == whatsapp_msg_id
+            )
+        )
+        existing_msg = existing.scalar_one_or_none()
+        if existing_msg is not None:
+            return existing_msg, False
+
+    msg = WhatsAppMessage(
+        lead_id=lead_id,
+        user_id=user_id,
+        whatsapp_msg_id=whatsapp_msg_id,
+        instance_name=instance_name,
+        sender_phone=sender_phone,
+        receiver_phone=receiver_phone,
+        direction=direction,
+        content=content,
+        media_type=media_type,
+        media_url=media_url,
+        status=status,
+        timestamp=timestamp or datetime.now(timezone.utc),
+    )
+
+    # Use a savepoint so that IntegrityError only rolls back THIS insert,
+    # not the entire parent transaction / batch.
+    try:
+        async with db.begin_nested():
+            db.add(msg)
+            await db.flush()
+    except IntegrityError:
+        # Duplicate — fetch and return the existing row
+        existing = await db.execute(
+            select(WhatsAppMessage).where(
+                WhatsAppMessage.whatsapp_msg_id == whatsapp_msg_id
+            )
+        )
+        existing_msg = existing.scalar_one_or_none()
+        return (existing_msg or msg), False
+
+    return msg, True
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Webhook Incoming Message Processing
+# ═══════════════════════════════════════════════════════════════════════
 
 async def process_incoming_message(
     db: AsyncSession,
@@ -674,78 +697,67 @@ async def process_incoming_message(
     timestamp: datetime | None = None,
     is_from_me: bool = False,
 ) -> WhatsAppMessage:
-    """Process an inbound WhatsApp message from the Evolution API webhook.
-
-    1. Match the correct phone number (sender if inbound, receiver if outbound) to a Lead.
-    2. Find the assigned sales rep.
-    3. Save the WhatsAppMessage row.
-    4. Log a LeadTimeline entry for AI context.
-    """
-    # 1. Match lead
+    """Process an inbound WhatsApp message event from the Evolution API webhook."""
     lead_phone = receiver_phone if is_from_me else sender_phone
     lead = await match_lead_by_phone(db, lead_phone)
     lead_id = lead.id if lead else None
     user_id = lead.assigned_rep_id if lead else None
 
-    # 2. Dedup — skip if we already stored this message
-    if whatsapp_msg_id:
-        existing = await db.execute(
-            select(WhatsAppMessage).where(WhatsAppMessage.whatsapp_msg_id == whatsapp_msg_id)
-        )
-        if existing.scalar_one_or_none():
-            logger.debug("Duplicate message %s, skipping", whatsapp_msg_id)
-            return existing.scalar_one_or_none()
-
-    # 3. Persist message
-    msg = WhatsAppMessage(
+    direction = MessageDirection.outbound if is_from_me else MessageDirection.inbound
+    msg, is_new = await upsert_message(
+        db,
         lead_id=lead_id,
         user_id=user_id,
-        whatsapp_msg_id=whatsapp_msg_id,
         instance_name=instance_name,
         sender_phone=sender_phone,
         receiver_phone=receiver_phone,
-        direction=MessageDirection.outbound if is_from_me else MessageDirection.inbound,
+        direction=direction,
         content=content,
+        whatsapp_msg_id=whatsapp_msg_id,
         media_type=media_type,
         media_url=media_url,
         status=MessageStatus.delivered,
-        timestamp=timestamp or datetime.now(timezone.utc),
+        timestamp=timestamp,
     )
-    db.add(msg)
 
-    # 4. Log to LeadTimeline and create in-app Notification (only if matched to a lead)
+    if not is_new:
+        logger.debug("process_incoming_message: duplicate msg %s, skipping timeline", whatsapp_msg_id)
+        await db.commit()
+        return msg
+
     if lead_id and user_id:
         preview = (content or "")[:200]
-        timeline_entry = LeadTimeline(
+        db.add(LeadTimeline(
             lead_id=lead_id,
             user_id=user_id,
             event_type="whatsapp_message",
             event_metadata={
-                "direction": "inbound",
+                "direction": "outbound" if is_from_me else "inbound",
                 "sender_phone": sender_phone,
                 "content_preview": preview,
                 "media_type": media_type,
             },
-        )
-        db.add(timeline_entry)
+        ))
 
-        # Only notify if it's an inbound message
         if not is_from_me:
-            lead_display = lead.name or sender_phone
-            notif = Notification(
+            lead_display = lead.name if lead else sender_phone
+            db.add(Notification(
                 user_id=user_id,
                 title=f"WhatsApp from {lead_display}",
-                message=f"{preview or '[Media]'}",
+                message=preview or "[Media]",
                 notification_type="whatsapp_message",
                 link_type="lead",
                 link_id=lead_id,
-            )
-            db.add(notif)
+            ))
 
     await db.commit()
     await db.refresh(msg)
     return msg
 
+
+# ═══════════════════════════════════════════════════════════════════════
+# Outbound Message Save (CRM-initiated sends)
+# ═══════════════════════════════════════════════════════════════════════
 
 async def save_outbound_message(
     db: AsyncSession,
@@ -758,34 +770,32 @@ async def save_outbound_message(
     content: str,
     whatsapp_msg_id: str | None = None,
 ) -> WhatsAppMessage:
-    """Save an outbound message sent from the CRM and log to timeline."""
-    msg = WhatsAppMessage(
+    """Save an outbound message sent from the CRM and log it to the timeline."""
+    msg, is_new = await upsert_message(
+        db,
         lead_id=lead_id,
         user_id=user_id,
-        whatsapp_msg_id=whatsapp_msg_id,
         instance_name=instance_name,
         sender_phone=sender_phone,
         receiver_phone=receiver_phone,
         direction=MessageDirection.outbound,
         content=content,
+        whatsapp_msg_id=whatsapp_msg_id,
         status=MessageStatus.sent,
         timestamp=datetime.now(timezone.utc),
     )
-    db.add(msg)
 
-    # Log timeline
-    preview = content[:200]
-    timeline_entry = LeadTimeline(
-        lead_id=lead_id,
-        user_id=user_id,
-        event_type="whatsapp_message",
-        event_metadata={
-            "direction": "outbound",
-            "receiver_phone": receiver_phone,
-            "content_preview": preview,
-        },
-    )
-    db.add(timeline_entry)
+    if is_new:
+        db.add(LeadTimeline(
+            lead_id=lead_id,
+            user_id=user_id,
+            event_type="whatsapp_message",
+            event_metadata={
+                "direction": "outbound",
+                "receiver_phone": receiver_phone,
+                "content_preview": content[:200],
+            },
+        ))
 
     await db.commit()
     await db.refresh(msg)

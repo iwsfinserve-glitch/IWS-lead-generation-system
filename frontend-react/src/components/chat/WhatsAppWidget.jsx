@@ -94,17 +94,19 @@ export default function WhatsAppWidget() {
   const handleSyncChat = async () => {
     if (!selectedLeadId) return;
     
-    const loadingToast = toast.loading('Syncing latest messages...');
+    const loadingToast = toast.loading('Syncing messages...');
     try {
       const res = await syncChatHistory(selectedLeadId);
       if (res.imported > 0) {
-        toast.success(`Synced ${res.imported} new message(s)!`, { id: loadingToast });
+        toast.success(`Synced ${res.imported} new message${res.imported !== 1 ? 's' : ''}!`, { id: loadingToast });
         loadMessages();
+      } else if (res.already_synced > 0) {
+        toast.success('All messages already up to date', { id: loadingToast });
       } else {
-        toast.success('Chat is already up to date', { id: loadingToast });
+        toast('No history found in WhatsApp for this contact', { id: loadingToast });
       }
     } catch (err) {
-      toast.error('Failed to sync chat history', { id: loadingToast });
+      toast.error('Sync failed — check WhatsApp connection', { id: loadingToast });
     }
   };
 
