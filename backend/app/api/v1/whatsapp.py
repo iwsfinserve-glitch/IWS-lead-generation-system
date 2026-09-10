@@ -19,7 +19,7 @@ Mounted at /api/v1 by main.py, so routes resolve to:
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -85,6 +85,7 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
         if not remote_jid or "@g.us" in remote_jid:
             continue
 
+        # Extract phone from JID: "919876543210@s.whatsapp.net" → "919876543210"
         contact_phone = remote_jid.split("@")[0]
 
         if is_from_me:
@@ -94,6 +95,7 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
             sender_phone = contact_phone
             receiver_phone = instance_name or ""
 
+        # Extract content
         message_obj = msg_data.get("message", {})
         content = (
             message_obj.get("conversation")
@@ -101,6 +103,7 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
             or ""
         )
 
+        # Media detection
         media_type = None
         media_url = None
         if "imageMessage" in message_obj:
@@ -160,6 +163,7 @@ async def list_chats(
     """
     instance_name = f"rep_{current_user.id}"
 
+    # Subquery: latest message timestamp per lead for this rep's instance
     latest_msg_sq = (
         select(
             WhatsAppMessage.lead_id,
@@ -230,7 +234,11 @@ async def get_chat_messages(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get the full WhatsApp message history for a specific lead (oldest first)."""
+    """Get the full WhatsApp message history for a specific lead.
+
+    Returns messages ordered by timestamp ascending (oldest first).
+    Marks inbound messages as read.
+    """
     lead = await db.get(Lead, lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -266,7 +274,10 @@ async def send_message(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Send a WhatsApp message to a lead from the CRM."""
+    """Send a WhatsApp message to a lead from the CRM.
+
+    Requires the current user to have a connected WhatsApp instance.
+    """
     lead = await db.get(Lead, lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -292,6 +303,7 @@ async def send_message(
             detail="Failed to send WhatsApp message. Check your WhatsApp connection.",
         )
 
+    # Extract Evolution API's message ID for deduplication
     wa_msg_id = None
     if isinstance(evo_resp, dict):
         key = evo_resp.get("key", {})
@@ -323,14 +335,22 @@ async def sync_chat_history(
 ):
     """Sync the complete conversation history for a lead from Evolution API.
 
-    Behaviour:
-    - Fetches ALL messages for this contact (old + new, inbound + outbound).
-    - For each message: if already in DB → skip; if missing → insert.
-    - NO messages are ever deleted. Always safe, always additive.
-    - If Evolution API returns 0 messages and the lead has no chat yet,
-      inserts a placeholder so the lead appears in the sidebar.
+    How it works:
+    - Fetches ALL messages for this contact (old + new, inbound + outbound)
+      from Evolution API's local database.
+    - For each message fetched:
+        - Already in DB (matched by whatsapp_msg_id) → skipped
+        - Not in DB → inserted
+    - NO messages are ever deleted. This operation is always safe and additive.
 
-    Returns: {"imported": N, "already_synced": M, "lead_id": lead_id}
+    This means:
+    - A first-time sync populates the entire conversation history.
+    - Subsequent syncs only insert genuinely new messages.
+    - Pressing sync multiple times is idempotent.
+    - Old messages missed during webhook downtime are recovered.
+
+    Returns:
+        {"imported": N, "already_synced": M, "lead_id": lead_id}
     """
     lead = await db.get(Lead, lead_id)
     if not lead:
@@ -345,73 +365,29 @@ async def sync_chat_history(
     clean_phone = _normalise_phone_for_wa(lead.phone_number)
     user_id = lead.assigned_rep_id or current_user.id
 
-    # ── Fetch ALL messages from Evolution API ──────────────────────────
-    fetch_error = None
-    raw_messages = []
+    # ── Fetch ALL messages for this contact from Evolution API ─────────
     try:
         raw_messages = await evo_client.fetch_messages_for_contact(
             instance_name, lead.phone_number, limit=1000
         )
     except Exception as exc:
-        fetch_error = str(exc)
-        logger.exception(
-            "sync_chat_history: Evolution API fetch failed for lead %d: %s", lead_id, exc
+        logger.exception("sync_chat_history: failed to fetch from Evolution API: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Could not fetch history from WhatsApp. Make sure your WhatsApp is connected.",
         )
 
     logger.info(
-        "sync_chat_history: fetched %d raw for lead %d (phone=%s, fetch_error=%s)",
-        len(raw_messages), lead_id, lead.phone_number, fetch_error,
+        "sync_chat_history: fetched %d raw messages for lead %d (phone=%s)",
+        len(raw_messages), lead_id, lead.phone_number,
     )
 
-    # ── If fetch failed entirely, don't destroy existing messages ──────
-    if fetch_error and not raw_messages:
-        existing_count_result = await db.execute(
-            select(func.count(WhatsAppMessage.id)).where(
-                WhatsAppMessage.lead_id == lead_id,
-                WhatsAppMessage.instance_name == instance_name,
-            )
-        )
-        existing_count = existing_count_result.scalar() or 0
-        if existing_count == 0:
-            raise HTTPException(
-                status_code=502,
-                detail="Could not fetch history from WhatsApp. Make sure your WhatsApp is connected.",
-            )
-        return {"imported": 0, "already_synced": existing_count, "lead_id": lead_id}
-
-    # ── Evolution API returned 0 messages ─────────────────────────────
-    # Insert a placeholder so the lead appears in the sidebar. This is
-    # critical for the "Start Fresh" flow — without it the lead never
-    # shows up in the chat list and the user can't open it to send a msg.
     if not raw_messages:
-        existing_check = await db.execute(
-            select(WhatsAppMessage.id).where(
-                WhatsAppMessage.lead_id == lead_id,
-                WhatsAppMessage.instance_name == instance_name,
-            ).limit(1)
+        logger.info(
+            "sync_chat_history: Evolution API returned 0 messages for lead %d — "
+            "no changes made to DB",
+            lead_id,
         )
-        if not existing_check.scalar():
-            placeholder_id = f"placeholder_{lead_id}_{instance_name}"
-            dup_check = await db.execute(
-                select(WhatsAppMessage).where(
-                    WhatsAppMessage.whatsapp_msg_id == placeholder_id
-                )
-            )
-            if not dup_check.scalar_one_or_none():
-                db.add(WhatsAppMessage(
-                    lead_id=lead_id,
-                    user_id=user_id,
-                    whatsapp_msg_id=placeholder_id,
-                    instance_name=instance_name,
-                    sender_phone=instance_name,
-                    receiver_phone=clean_phone,
-                    direction=MessageDirection.outbound,
-                    content="💬 Chat started — send your first message!",
-                    status=MessageStatus.delivered,
-                    timestamp=datetime.now(timezone.utc),
-                ))
-                await db.commit()
-                logger.info("sync_chat_history: inserted placeholder for lead %d", lead_id)
         return {
             "imported": 0,
             "already_synced": 0,
@@ -422,64 +398,56 @@ async def sync_chat_history(
     # ── Upsert each message — skip existing, insert new ───────────────
     imported = 0
     already_synced = 0
-    errors = 0
 
     for raw in raw_messages:
-        try:
-            key_d = raw.get("key", {}) if isinstance(raw.get("key"), dict) else {}
+        key_d = raw.get("key", {}) if isinstance(raw.get("key"), dict) else {}
 
-            # Skip group messages
-            jid = str(key_d.get("remoteJid") or raw.get("remoteJid") or "")
-            if "@g.us" in jid or "@broadcast" in jid:
-                continue
-
-            wa_msg_id = key_d.get("id") or raw.get("id")
-            from_me = bool(
-                key_d.get("fromMe") if "fromMe" in key_d else raw.get("fromMe", False)
-            )
-
-            content, media_type = extract_content_and_media(raw.get("message"), raw)
-            ts = extract_timestamp(raw)
-
-            if not wa_msg_id:
-                wa_msg_id = f"sync_{lead_id}_{int(ts.timestamp())}_{1 if from_me else 0}"
-
-            direction = MessageDirection.outbound if from_me else MessageDirection.inbound
-            sender = instance_name if from_me else clean_phone
-            receiver = clean_phone if from_me else instance_name
-
-            _msg, is_new = await upsert_message(
-                db,
-                lead_id=lead_id,
-                user_id=user_id,
-                instance_name=instance_name,
-                sender_phone=sender,
-                receiver_phone=receiver,
-                direction=direction,
-                content=content if content else None,
-                whatsapp_msg_id=str(wa_msg_id),
-                media_type=media_type,
-                status=MessageStatus.delivered,
-                timestamp=ts,
-            )
-
-            if is_new:
-                imported += 1
-            else:
-                already_synced += 1
-
-        except Exception as exc:
-            errors += 1
-            logger.warning(
-                "sync_chat_history: error upserting message for lead %d: %s", lead_id, exc
-            )
+        # Skip group messages
+        jid = str(key_d.get("remoteJid") or raw.get("remoteJid") or "")
+        if "@g.us" in jid or "@broadcast" in jid:
             continue
+
+        wa_msg_id = key_d.get("id") or raw.get("id")
+        from_me = bool(
+            key_d.get("fromMe") if "fromMe" in key_d else raw.get("fromMe", False)
+        )
+
+        content, media_type = extract_content_and_media(raw.get("message"), raw)
+
+        # Build a stable fallback ID for messages with no WA ID
+        ts = extract_timestamp(raw)
+        if not wa_msg_id:
+            wa_msg_id = f"sync_{lead_id}_{int(ts.timestamp())}_{1 if from_me else 0}"
+
+        direction = MessageDirection.outbound if from_me else MessageDirection.inbound
+        sender = instance_name if from_me else clean_phone
+        receiver = clean_phone if from_me else instance_name
+
+        _msg, is_new = await upsert_message(
+            db,
+            lead_id=lead_id,
+            user_id=user_id,
+            instance_name=instance_name,
+            sender_phone=sender,
+            receiver_phone=receiver,
+            direction=direction,
+            content=content if content else None,
+            whatsapp_msg_id=str(wa_msg_id),
+            media_type=media_type,
+            status=MessageStatus.delivered,
+            timestamp=ts,
+        )
+
+        if is_new:
+            imported += 1
+        else:
+            already_synced += 1
 
     await db.commit()
 
     logger.info(
-        "sync_chat_history: lead %d — imported=%d, already_synced=%d, errors=%d",
-        lead_id, imported, already_synced, errors,
+        "sync_chat_history: lead %d — imported %d new, %d already in DB",
+        lead_id, imported, already_synced,
     )
     return {
         "imported": imported,
@@ -498,9 +466,10 @@ async def delete_chat(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete all WhatsApp messages for a lead from the CRM (hides the chat).
+    """Delete all WhatsApp messages associated with a lead from the CRM.
 
-    The actual messages on WhatsApp are not deleted — only the CRM records.
+    This hides the chat from the inbox. The actual messages on the WhatsApp
+    app are not deleted — only the CRM records are removed.
     """
     from sqlalchemy import delete
 
@@ -527,7 +496,12 @@ async def leads_without_chats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return CRM leads that have NO WhatsApp messages yet (for the Start Chat modal)."""
+    """Return CRM leads that have NO WhatsApp messages yet.
+
+    Used by the 'Start Chat' modal to show a lead picker. Only returns leads
+    with a phone number so a WhatsApp session can be initiated.
+    Sales reps see only their assigned leads; managers see all.
+    """
     existing_sq = (
         select(WhatsAppMessage.lead_id)
         .where(WhatsAppMessage.lead_id.isnot(None))
@@ -571,7 +545,11 @@ async def create_instance(
     body: InstanceCreateRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """Create a new Evolution API instance for WhatsApp connection."""
+    """Create a new Evolution API instance for WhatsApp connection.
+
+    After creation, the frontend should poll the QR endpoint to display
+    the QR code for the sales rep to scan with their phone.
+    """
     try:
         result = await evo_client.create_instance(body.instance_name)
     except Exception as exc:
@@ -598,7 +576,7 @@ async def get_instance_qr(
     instance_name: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Fetch the QR code for an instance waiting for scan."""
+    """Fetch the QR code for an instance that's waiting for scan."""
     try:
         result = await evo_client.get_qr_code(instance_name)
     except Exception as exc:
@@ -651,7 +629,11 @@ async def get_instance_status(
 async def logout_instance(
     current_user: User = Depends(get_current_user),
 ):
-    """Log out (disconnect) the current user's WhatsApp instance."""
+    """Log out (disconnect) the current user's WhatsApp instance.
+
+    This severs the connection to WhatsApp. The user will need to scan
+    a new QR code to reconnect.
+    """
     instance_name = f"rep_{current_user.id}"
     try:
         await evo_client.logout_instance(instance_name)

@@ -8,15 +8,18 @@ Handles:
 4. History sync: fetch ALL messages for a contact from Evolution API and
    upsert only the ones that are not already in the DB (additive, never wipes).
 
-Design principles (v3):
-- upsert_message() is the SINGLE canonical save path for all WhatsApp messages.
-- Sync is ADDITIVE: fetches everything from Evolution API, inserts only what's
-  missing from our DB. No DELETE ever happens during sync.
-- upsert_message() uses SQLAlchemy savepoints (begin_nested) instead of a full
-  session rollback — so a duplicate-key IntegrityError on message N never wipes
-  messages 1..(N-1) that were already added in the same batch.
-- lead_id / user_id are resolved by the caller; upsert_message() accepts whatever
-  it's given and saves regardless (no lead-match guard).
+The Evolution API runs as a sibling Railway service and exposes a REST API
+authenticated by a global API key.
+
+Design principles (v2):
+- upsert_message() is the SINGLE canonical save path — both the webhook and
+  the manual sync funnel through here.
+- Sync is ADDITIVE: old messages, new messages, inbound and outbound are all
+  fetched from Evolution API. Only messages whose whatsapp_msg_id does not
+  yet exist in the DB are inserted.
+- No DELETE ever happens during a sync. Pressing sync is always safe.
+- lead_id / user_id are resolved by the caller; upsert_message() does not do
+  phone matching — it accepts whatever it's given.
 """
 
 import logging
@@ -43,7 +46,10 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════════
 
 class EvolutionAPIClient:
-    """Thin wrapper around the Evolution API REST endpoints."""
+    """Thin wrapper around the Evolution API REST endpoints.
+
+    All methods are async and use httpx for non-blocking HTTP calls.
+    """
 
     def __init__(self):
         url = (settings.EVOLUTION_API_URL or "").strip().rstrip("/")
@@ -84,7 +90,7 @@ class EvolutionAPIClient:
             return resp.json()
 
     async def get_qr_code(self, instance_name: str) -> dict:
-        """Fetch the QR code for an instance waiting for scan."""
+        """Fetch the QR code for an instance that's waiting for scan."""
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 self._url(f"/instance/connect/{instance_name}"),
@@ -98,13 +104,16 @@ class EvolutionAPIClient:
 
         Evolution API often returns 4xx/5xx even on a successful logout
         (e.g. 400 if already disconnected, 404 if session not found).
-        We treat any response as success since the intent is achieved.
+        We treat any response as success since the intent is achieved —
+        the session is disconnected regardless of the status code.
         """
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.delete(
                 self._url(f"/instance/logout/{instance_name}"),
                 headers=self.headers,
             )
+            # Don't raise — Evolution API frequently returns non-200 on logout
+            # even when the disconnection actually succeeds.
             try:
                 return resp.json()
             except Exception:
@@ -123,7 +132,13 @@ class EvolutionAPIClient:
     # ── Messaging ──────────────────────────────────────────────────────
 
     async def send_text_message(self, instance_name: str, phone: str, text: str) -> dict:
-        """Send a text message via the connected WhatsApp instance."""
+        """Send a text message via the connected WhatsApp instance.
+
+        Args:
+            instance_name: The Evolution API session name.
+            phone: Recipient phone in international format (e.g. '919876543210').
+            text: Message text content.
+        """
         clean_phone = phone.replace("+", "").replace(" ", "").replace("-", "")
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
@@ -151,10 +166,17 @@ class EvolutionAPIClient:
         return []
 
     async def _fetch_by_number(
-        self, instance_name: str, number: str, limit: int = 1000
+        self,
+        instance_name: str,
+        number: str,
+        limit: int = 1000,
     ) -> list[dict]:
-        """Fetch messages using Evolution API's number filter (server-side)."""
-        async with httpx.AsyncClient(timeout=60) as client:
+        """Fetch messages using Evolution API's built-in number filter.
+
+        This is the most reliable approach — server-side filtering by phone number.
+        Returns all messages (inbound + outbound) for that contact.
+        """
+        async with httpx.AsyncClient(timeout=30) as client:
             try:
                 resp = await client.post(
                     self._url(f"/chat/findMessages/{instance_name}"),
@@ -170,16 +192,23 @@ class EvolutionAPIClient:
                     return records
             except Exception as exc:
                 logger.debug(
-                    "_fetch_by_number failed (%s, number=%s): %s",
+                    "_fetch_by_number failed for %s (number=%s): %s",
                     instance_name, number, exc,
                 )
         return []
 
     async def _fetch_by_jid(
-        self, instance_name: str, remote_jid: str, limit: int = 1000
+        self,
+        instance_name: str,
+        remote_jid: str,
+        limit: int = 1000,
     ) -> list[dict]:
-        """Fetch messages using an exact WhatsApp JID (remoteJid filter)."""
-        async with httpx.AsyncClient(timeout=60) as client:
+        """Fetch messages using a specific WhatsApp JID (remoteJid filter).
+
+        Used as a supplementary strategy when the exact JID is known
+        (including @lid privacy-identifier JIDs).
+        """
+        async with httpx.AsyncClient(timeout=30) as client:
             try:
                 resp = await client.post(
                     self._url(f"/chat/findMessages/{instance_name}"),
@@ -198,33 +227,9 @@ class EvolutionAPIClient:
                     return records
             except Exception as exc:
                 logger.debug(
-                    "_fetch_by_jid failed (%s, jid=%s): %s",
+                    "_fetch_by_jid failed for %s (jid=%s): %s",
                     instance_name, remote_jid, exc,
                 )
-        return []
-
-    async def _fetch_broad(self, instance_name: str, limit: int = 2000) -> list[dict]:
-        """Broad fetch — returns the N most recent messages across all chats.
-
-        Used as a fallback when number/JID specific queries return nothing.
-        Caller is responsible for filtering by phone.
-        """
-        async with httpx.AsyncClient(timeout=90) as client:
-            try:
-                resp = await client.post(
-                    self._url(f"/chat/findMessages/{instance_name}"),
-                    headers=self.headers,
-                    json={"limit": limit},
-                )
-                if resp.status_code == 200:
-                    records = self._parse_message_records(resp.json())
-                    logger.info(
-                        "_fetch_broad(%s, limit=%d): %d records",
-                        instance_name, limit, len(records),
-                    )
-                    return records
-            except Exception as exc:
-                logger.warning("_fetch_broad failed for %s: %s", instance_name, exc)
         return []
 
     async def find_contacts(self, instance_name: str) -> list[dict]:
@@ -290,7 +295,12 @@ class EvolutionAPIClient:
             return []
 
     async def _resolve_candidate_jids(self, instance_name: str, phone: str) -> list[str]:
-        """Resolve all candidate WhatsApp JIDs for a phone number."""
+        """Resolve all candidate WhatsApp JIDs for a phone number.
+
+        Builds the standard @s.whatsapp.net JIDs plus queries contacts/chats
+        to discover any @lid privacy-identifier JIDs for this contact.
+        Returns a deduplicated, ordered list of JIDs to try.
+        """
         digits = re.sub(r"\D", "", str(phone or ""))
         if not digits:
             return []
@@ -308,6 +318,7 @@ class EvolutionAPIClient:
                 seen.add(jid)
                 candidates.append(jid)
 
+        # Standard JID formats
         clean_wa = _normalise_phone_for_wa(phone)
         if clean_wa:
             add(f"{clean_wa}@s.whatsapp.net")
@@ -320,6 +331,7 @@ class EvolutionAPIClient:
 
         last10 = digits[-10:] if len(digits) >= 10 else digits
 
+        # Check contacts for @lid or alternative JIDs
         try:
             contacts = await self.find_contacts(instance_name)
             for c in contacts:
@@ -337,11 +349,13 @@ class EvolutionAPIClient:
                 ):
                     continue
 
+                # Prefer @lid first (most specific), then standard JIDs
                 for jid_candidate in [c_lid, c_jid, c_id, c_alt]:
                     add(jid_candidate)
         except Exception as exc:
-            logger.debug("_resolve_candidate_jids contacts failed: %s", exc)
+            logger.debug("_resolve_candidate_jids contacts check failed: %s", exc)
 
+        # Also check active chats
         try:
             chats = await self.find_chats(instance_name)
             for ch in chats:
@@ -361,7 +375,7 @@ class EvolutionAPIClient:
                 for jid_candidate in [ch_lid, ch_jid, ch_id]:
                     add(jid_candidate)
         except Exception as exc:
-            logger.debug("_resolve_candidate_jids chats failed: %s", exc)
+            logger.debug("_resolve_candidate_jids chats check failed: %s", exc)
 
         return candidates
 
@@ -374,11 +388,14 @@ class EvolutionAPIClient:
         """Fetch the complete conversation history for a phone number.
 
         Returns ALL messages — old and new, inbound and outbound — for this
-        contact. Uses three strategies in order:
+        contact from Evolution API's local database. Deduplication by
+        whatsapp_msg_id is the caller's responsibility.
 
-        1. Number-param filter (server-side, most reliable when it works)
-        2. JID-targeted queries (handles @lid privacy identifiers)
-        3. Broad fetch + client-side phone filter (fallback — always works)
+        Strategy:
+        1. Primary: number-param filter (confirmed working, server-side filter).
+           Tries the 12-digit (with country code) and 10-digit variants.
+        2. Supplementary: JID-targeted queries for each resolved JID.
+           Catches @lid contacts and any JID the number-filter missed.
 
         All results are merged and deduplicated by message ID before returning.
         """
@@ -389,7 +406,8 @@ class EvolutionAPIClient:
         suffix10 = digits[-10:] if len(digits) >= 10 else digits
         clean_12 = f"91{suffix10}" if len(suffix10) == 10 else digits
 
-        all_records: dict[str, dict] = {}
+        # Collect all records, dedup by message ID
+        all_records: dict[str, dict] = {}  # msg_id → record
 
         def merge(records: list[dict]):
             for rec in records:
@@ -401,70 +419,36 @@ class EvolutionAPIClient:
                     if msg_id not in all_records:
                         all_records[msg_id] = rec
                 else:
-                    synthetic = f"__no_id_{len(all_records)}"
+                    # No ID — use a synthetic key to avoid dropping the record
+                    ts = rec.get("messageTimestamp") or rec.get("timestamp") or "0"
+                    synthetic = f"__no_id_{ts}_{len(all_records)}"
                     all_records[synthetic] = rec
 
-        # ── Strategy 1: number-param filter ──────────────────────────
+        # ── Strategy 1: number-param fetch (primary) ──────────────────
         for number in dict.fromkeys([clean_12, suffix10, digits]):
             if not number:
                 continue
             records = await self._fetch_by_number(instance_name, number, limit=limit)
             before = len(all_records)
             merge(records)
-            if len(all_records) > before:
+            added = len(all_records) - before
+            if added:
                 logger.info(
-                    "fetch_messages_for_contact: number=%s → +%d records (phone=%s)",
-                    number, len(all_records) - before, phone,
+                    "fetch_messages_for_contact: number=%s contributed %d records for phone=%s",
+                    number, added, phone,
                 )
 
-        # ── Strategy 2: JID-targeted queries ─────────────────────────
+        # ── Strategy 2: JID-targeted queries (supplementary) ─────────
         candidate_jids = await self._resolve_candidate_jids(instance_name, phone)
         for jid in candidate_jids:
             records = await self._fetch_by_jid(instance_name, jid, limit=limit)
             before = len(all_records)
             merge(records)
-            if len(all_records) > before:
+            added = len(all_records) - before
+            if added:
                 logger.info(
-                    "fetch_messages_for_contact: jid=%s → +%d records (phone=%s)",
-                    jid, len(all_records) - before, phone,
-                )
-
-        # ── Strategy 3: broad fallback (if 1+2 returned nothing) ─────
-        if not all_records:
-            logger.info(
-                "fetch_messages_for_contact: targeted queries returned 0 for phone=%s, "
-                "falling back to broad fetch + client-side filter",
-                phone,
-            )
-            raw_all = await self._fetch_broad(instance_name, limit=2000)
-            for rec in raw_all:
-                if not isinstance(rec, dict):
-                    continue
-                key_d = rec.get("key", {}) if isinstance(rec.get("key"), dict) else {}
-                jid = str(key_d.get("remoteJid") or rec.get("remoteJid") or "")
-                # Skip groups
-                if "@g.us" in jid or "@broadcast" in jid:
-                    continue
-                # Client-side match by last-10 digits
-                jid_digits = re.sub(r"\D", "", jid.split("@")[0].split(":")[0])
-                if not jid_digits:
-                    continue
-                if not (
-                    suffix10 in jid_digits
-                    or (len(jid_digits) >= 10 and jid_digits[-10:] == suffix10)
-                ):
-                    continue
-                msg_id = key_d.get("id") or rec.get("id")
-                if msg_id:
-                    if msg_id not in all_records:
-                        all_records[msg_id] = rec
-                else:
-                    all_records[f"__no_id_{len(all_records)}"] = rec
-
-            if all_records:
-                logger.info(
-                    "fetch_messages_for_contact: broad fallback found %d records for phone=%s",
-                    len(all_records), phone,
+                    "fetch_messages_for_contact: jid=%s contributed %d new records for phone=%s",
+                    jid, added, phone,
                 )
 
         result = list(all_records.values())
@@ -513,6 +497,7 @@ def extract_content_and_media(
     if not isinstance(msg_obj, dict):
         return "", None
 
+    # Unwrap message wrappers
     for wrapper_key in (
         "ephemeralMessage",
         "viewOnceMessage",
@@ -578,7 +563,10 @@ def extract_timestamp(raw: dict) -> datetime:
 # ═══════════════════════════════════════════════════════════════════════
 
 async def match_lead_by_phone(db: AsyncSession, phone: str) -> Lead | None:
-    """Find a lead whose phone_number matches the given WhatsApp phone."""
+    """Find a lead whose phone_number matches the given WhatsApp phone.
+
+    Handles 10-digit vs 12-digit (with country code 91) mismatches automatically.
+    """
     from sqlalchemy import func, or_
 
     clean_wa = _normalise_phone_for_wa(phone)
@@ -623,19 +611,27 @@ async def upsert_message(
     This is the SINGLE canonical save path for all WhatsApp messages — both
     the real-time webhook and the manual sync endpoint use this function.
 
-    IMPORTANT — transaction safety:
-    On IntegrityError (duplicate whatsapp_msg_id race condition), this function
-    uses a SQLAlchemy savepoint (begin_nested) so that only the failing INSERT
-    is rolled back. The outer transaction — and all other messages inserted in
-    the same batch — remains intact. This prevents a single duplicate from
-    wiping an entire sync batch.
+    Args:
+        db: Database session.
+        lead_id: CRM lead to associate with (None if unknown).
+        user_id: Sales rep user ID (None if unknown).
+        instance_name: Evolution API instance name (e.g. 'rep_5').
+        sender_phone: Phone of the message sender.
+        receiver_phone: Phone of the message receiver.
+        direction: MessageDirection.inbound or .outbound.
+        content: Text content of the message.
+        whatsapp_msg_id: WhatsApp's own unique message ID (used for dedup).
+        media_type: 'image' | 'video' | 'audio' | 'document' | None for text.
+        media_url: URL to media file (if applicable).
+        status: MessageStatus (default: delivered).
+        timestamp: Message timestamp (default: now).
 
     Returns:
-        (WhatsAppMessage, is_new: bool)
-        is_new=True  → message was newly inserted
-        is_new=False → message already existed (no DB change)
+        Tuple of (WhatsAppMessage, is_new: bool).
+        is_new=True means the message was newly inserted.
+        is_new=False means it already existed (no DB change made).
     """
-    # Fast-path: check existence first to avoid hitting the savepoint on every message
+    # Check if already in DB by whatsapp_msg_id
     if whatsapp_msg_id:
         existing = await db.execute(
             select(WhatsAppMessage).where(
@@ -660,22 +656,20 @@ async def upsert_message(
         status=status,
         timestamp=timestamp or datetime.now(timezone.utc),
     )
+    db.add(msg)
 
-    # Use a savepoint so that IntegrityError only rolls back THIS insert,
-    # not the entire parent transaction / batch.
     try:
-        async with db.begin_nested():
-            db.add(msg)
-            await db.flush()
+        await db.flush()  # Flush to catch unique constraint violations early
     except IntegrityError:
-        # Duplicate — fetch and return the existing row
+        # Race condition: another request inserted the same message_id concurrently
+        await db.rollback()
         existing = await db.execute(
             select(WhatsAppMessage).where(
                 WhatsAppMessage.whatsapp_msg_id == whatsapp_msg_id
             )
         )
         existing_msg = existing.scalar_one_or_none()
-        return (existing_msg or msg), False
+        return existing_msg, False
 
     return msg, True
 
@@ -697,12 +691,22 @@ async def process_incoming_message(
     timestamp: datetime | None = None,
     is_from_me: bool = False,
 ) -> WhatsAppMessage:
-    """Process an inbound WhatsApp message event from the Evolution API webhook."""
+    """Process an inbound WhatsApp message event from the Evolution API webhook.
+
+    Steps:
+    1. Determine which phone belongs to the lead (sender if inbound, receiver if outbound).
+    2. Match the lead by phone number (best-effort; lead_id can be None).
+    3. Upsert the message (skipped silently if already in DB).
+    4. Log a LeadTimeline entry and create an in-app Notification (if matched to a lead).
+    5. Commit.
+    """
+    # 1. Resolve lead
     lead_phone = receiver_phone if is_from_me else sender_phone
     lead = await match_lead_by_phone(db, lead_phone)
     lead_id = lead.id if lead else None
     user_id = lead.assigned_rep_id if lead else None
 
+    # 2. Upsert message — no lead match guard, save regardless
     direction = MessageDirection.outbound if is_from_me else MessageDirection.inbound
     msg, is_new = await upsert_message(
         db,
@@ -725,9 +729,10 @@ async def process_incoming_message(
         await db.commit()
         return msg
 
+    # 3. LeadTimeline + Notification (only when matched to a lead)
     if lead_id and user_id:
         preview = (content or "")[:200]
-        db.add(LeadTimeline(
+        timeline_entry = LeadTimeline(
             lead_id=lead_id,
             user_id=user_id,
             event_type="whatsapp_message",
@@ -737,18 +742,21 @@ async def process_incoming_message(
                 "content_preview": preview,
                 "media_type": media_type,
             },
-        ))
+        )
+        db.add(timeline_entry)
 
+        # Notify the rep only for inbound messages
         if not is_from_me:
             lead_display = lead.name if lead else sender_phone
-            db.add(Notification(
+            notif = Notification(
                 user_id=user_id,
                 title=f"WhatsApp from {lead_display}",
                 message=preview or "[Media]",
                 notification_type="whatsapp_message",
                 link_type="lead",
                 link_id=lead_id,
-            ))
+            )
+            db.add(notif)
 
     await db.commit()
     await db.refresh(msg)
@@ -770,7 +778,10 @@ async def save_outbound_message(
     content: str,
     whatsapp_msg_id: str | None = None,
 ) -> WhatsAppMessage:
-    """Save an outbound message sent from the CRM and log it to the timeline."""
+    """Save an outbound message sent from the CRM and log it to the timeline.
+
+    Always uses upsert_message() so duplicate webhook echoes are handled safely.
+    """
     msg, is_new = await upsert_message(
         db,
         lead_id=lead_id,
@@ -786,16 +797,18 @@ async def save_outbound_message(
     )
 
     if is_new:
-        db.add(LeadTimeline(
+        preview = content[:200]
+        timeline_entry = LeadTimeline(
             lead_id=lead_id,
             user_id=user_id,
             event_type="whatsapp_message",
             event_metadata={
                 "direction": "outbound",
                 "receiver_phone": receiver_phone,
-                "content_preview": content[:200],
+                "content_preview": preview,
             },
-        ))
+        )
+        db.add(timeline_entry)
 
     await db.commit()
     await db.refresh(msg)
