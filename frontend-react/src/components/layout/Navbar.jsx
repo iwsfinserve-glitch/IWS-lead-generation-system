@@ -182,41 +182,71 @@ export default function Navbar({ title }) {
               position: 'absolute',
               top: 'calc(100% + 8px)',
               right: 0,
-              width: 340,
-              maxHeight: 420,
+              width: 380,
+              maxWidth: 'calc(100vw - 24px)',
+              maxHeight: 460,
               background: 'var(--bg-card-solid, #1e293b)',
               border: '1px solid var(--border, rgba(255,255,255,0.1))',
               borderRadius: 12,
-              boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
+              boxShadow: '0 10px 30px -5px rgba(0, 0, 0, 0.5)',
               zIndex: 1000,
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
+              boxSizing: 'border-box',
             }}
           >
             <div
               style={{
-                padding: '12px 16px',
+                padding: '12px 14px',
                 borderBottom: '1px solid var(--border, rgba(255,255,255,0.1))',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 gap: 8,
+                flexWrap: 'nowrap',
+                boxSizing: 'border-box',
               }}
             >
-              <div style={{ fontWeight: 700, fontSize: '0.9rem', whiteSpace: 'nowrap' }}>
-                Notifications {unreadCount > 0 && `(${unreadCount} unread)`}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                  Notifications
+                </span>
+                {unreadCount > 0 && (
+                  <span
+                    style={{
+                      background: 'rgba(99, 102, 241, 0.15)',
+                      color: 'var(--primary, #6366f1)',
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      padding: '1px 6px',
+                      borderRadius: 10,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {unreadCount} unread
+                  </span>
+                )}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                 {unreadCount > 0 && (
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
                     onClick={handleMarkAllRead}
                     title="Mark all as read"
-                    style={{ fontSize: '0.75rem', padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
+                    style={{
+                      fontSize: '0.75rem',
+                      padding: '3px 8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      whiteSpace: 'nowrap',
+                      height: 'auto',
+                      minHeight: '26px',
+                    }}
                   >
-                    <CheckCheck size={14} /> Read
+                    <CheckCheck size={13} /> Mark read
                   </button>
                 )}
                 {notifications.length > 0 && (
@@ -228,11 +258,14 @@ export default function Navbar({ title }) {
                     title="Clear all notifications"
                     style={{
                       fontSize: '0.75rem',
-                      padding: '2px 8px',
+                      padding: '3px 8px',
                       display: 'flex',
                       alignItems: 'center',
                       gap: 4,
                       color: 'var(--danger, #ef4444)',
+                      whiteSpace: 'nowrap',
+                      height: 'auto',
+                      minHeight: '26px',
                     }}
                   >
                     <Trash2 size={13} /> Clear all
@@ -241,9 +274,18 @@ export default function Navbar({ title }) {
               </div>
             </div>
 
-            <div style={{ overflowY: 'auto', flex: 1, padding: 8 }}>
+            <div
+              style={{
+                overflowY: 'auto',
+                flex: 1,
+                padding: '8px 10px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+              }}
+            >
               {notifications.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                   No notifications yet
                 </div>
               ) : (
@@ -254,15 +296,37 @@ export default function Navbar({ title }) {
                     style={{
                       padding: '10px 12px',
                       borderRadius: 8,
-                      marginBottom: 4,
                       cursor: 'pointer',
-                      background: notif.is_read ? 'transparent' : 'rgba(99, 102, 241, 0.12)',
+                      background: notif.is_read ? 'rgba(255, 255, 255, 0.02)' : 'rgba(99, 102, 241, 0.12)',
                       borderLeft: notif.is_read ? '3px solid transparent' : '3px solid var(--primary, #6366f1)',
-                      transition: 'background 0.2s',
+                      borderTop: '1px solid var(--border, rgba(255,255,255,0.05))',
+                      borderRight: '1px solid var(--border, rgba(255,255,255,0.05))',
+                      borderBottom: '1px solid var(--border, rgba(255,255,255,0.05))',
+                      transition: 'all 0.15s ease',
+                      boxSizing: 'border-box',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
-                      <div style={{ fontWeight: notif.is_read ? 600 : 700, fontSize: '0.85rem' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        marginBottom: 4,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontWeight: notif.is_read ? 600 : 700,
+                          fontSize: '0.85rem',
+                          color: 'var(--text-primary)',
+                          wordBreak: 'break-word',
+                          overflowWrap: 'break-word',
+                          flex: 1,
+                          minWidth: 0,
+                          lineHeight: 1.35,
+                        }}
+                      >
                         {notif.title}
                       </div>
                       <button
@@ -275,22 +339,47 @@ export default function Navbar({ title }) {
                           color: 'var(--text-muted, #94a3b8)',
                           cursor: 'pointer',
                           padding: 2,
+                          width: 20,
+                          height: 20,
                           display: 'flex',
                           alignItems: 'center',
+                          justifyContent: 'center',
                           borderRadius: 4,
                           flexShrink: 0,
+                          marginTop: -2,
+                          marginRight: -4,
                         }}
-                        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--danger, #ef4444)'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted, #94a3b8)'; }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.color = 'var(--danger, #ef4444)';
+                          e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.color = 'var(--text-muted, #94a3b8)';
+                          e.currentTarget.style.background = 'transparent';
+                        }}
                       >
                         <X size={14} />
                       </button>
                     </div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: 4 }}>
+                    <div
+                      style={{
+                        fontSize: '0.78rem',
+                        color: 'var(--text-secondary)',
+                        marginBottom: 6,
+                        wordBreak: 'break-word',
+                        overflowWrap: 'break-word',
+                        lineHeight: 1.4,
+                      }}
+                    >
                       {notif.message}
                     </div>
                     <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                      {new Date(notif.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      {new Date(notif.created_at).toLocaleString([], {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
                     </div>
                   </div>
                 ))
