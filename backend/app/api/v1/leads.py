@@ -33,7 +33,7 @@ from app.schemas.bulk_lead import (
 from app.api.dependencies import get_current_user, require_roles
 from app.api.helpers import get_lead_or_404, _get_lead_or_404
 from app.services.ai_sync import trigger_ai_analysis_background
-from app.services.notification_service import notify_sales_reps_and_managers
+from app.services.notification_service import create_notification, notify_sales_reps_and_managers
 from app.core.config import settings
 
 router = APIRouter(prefix="/leads", tags=["Leads"])
@@ -741,15 +741,16 @@ async def bulk_assign_leads(
     await db.commit()
     
     if assigned_count + transferred_count > 0:
-        await notify_sales_reps_and_managers(
+        await create_notification(
             db,
+            user_id=target_rep.id,
             title="Bulk Leads Assigned",
             message=f"{assigned_count + transferred_count} leads have been assigned to you by {current_user.name}.",
             notification_type="Leads",
-            link_type="leads",
-            link_id=0,
-            target_user_id=target_rep.id
+            link_type="lead",
+            link_id=None,
         )
+        await db.commit()
 
     return BulkAssignResponse(
         assigned_count=assigned_count,

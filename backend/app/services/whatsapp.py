@@ -758,15 +758,17 @@ async def process_incoming_message(
     lead = await match_lead_by_phone(db, lead_phone)
     lead_id = lead.id if lead else None
 
-    # Determine user_id from instance_name (e.g. "rep_3" -> 3) or lead's assigned rep
+    # Determine user_id:
+    # 1. If lead is matched and assigned to a rep, the assigned rep is the owner.
+    # 2. Otherwise fallback to instance_name (e.g. "rep_3" -> 3).
     user_id = None
-    if instance_name and instance_name.startswith("rep_"):
+    if lead and lead.assigned_rep_id:
+        user_id = lead.assigned_rep_id
+    elif instance_name and instance_name.startswith("rep_"):
         try:
             user_id = int(instance_name.split("_")[1])
         except (ValueError, IndexError):
             pass
-    if not user_id and lead:
-        user_id = lead.assigned_rep_id
 
     # 2. Upsert message — no lead match guard, save regardless
     direction = MessageDirection.outbound if is_from_me else MessageDirection.inbound
@@ -791,12 +793,13 @@ async def process_incoming_message(
         await db.commit()
         return msg
 
-    # 3. LeadTimeline + Notification (only when matched to a lead)
-    if lead_id and user_id:
+    # 3. LeadTimeline + Notification (only when matched to a lead and target user exists)
+    target_user_id = (lead.assigned_rep_id if (lead and lead.assigned_rep_id) else user_id)
+    if lead_id and target_user_id:
         preview = (content or "")[:200]
         timeline_entry = LeadTimeline(
             lead_id=lead_id,
-            user_id=user_id,
+            user_id=target_user_id,
             event_type="whatsapp_message",
             event_metadata={
                 "direction": "outbound" if is_from_me else "inbound",
@@ -807,11 +810,11 @@ async def process_incoming_message(
         )
         db.add(timeline_entry)
 
-        # Notify the rep only for inbound messages
+        # Notify the assigned rep only for inbound messages
         if not is_from_me:
             lead_display = lead.name if lead else sender_phone
             notif = Notification(
-                user_id=user_id,
+                user_id=target_user_id,
                 title=f"WhatsApp from {lead_display}",
                 message=preview or "[Media]",
                 notification_type="whatsapp_message",
