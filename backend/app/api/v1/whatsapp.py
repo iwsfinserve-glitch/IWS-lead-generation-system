@@ -44,6 +44,7 @@ from app.services.whatsapp import (
     extract_content_and_media,
     extract_timestamp,
 )
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,12 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
     Evolution API sends POST payloads for various events. We only process
     'messages.upsert' events containing actual message content.
     """
+    # Optional webhook token authentication
+    if settings.EVOLUTION_API_KEY:
+        provided_key = request.headers.get("apikey") or request.headers.get("x-api-key") or request.query_params.get("token")
+        if provided_key and provided_key != settings.EVOLUTION_API_KEY:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid webhook authentication")
+
     try:
         payload = await request.json()
     except Exception:

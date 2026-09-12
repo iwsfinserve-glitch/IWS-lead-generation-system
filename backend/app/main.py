@@ -28,6 +28,7 @@ from app.api.v1 import whatsapp
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.db.session import engine
 from app.db.base import Base
@@ -44,7 +45,7 @@ if settings.SENTRY_DSN:
     )
     logger.info("Sentry monitoring initialized for environment: %s", "production" if settings.PRODUCTION else settings.ENVIRONMENT)
 
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 
 @asynccontextmanager
@@ -74,6 +75,7 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # ── CORS Configuration ─────────────────────────────────────────────────
 app.add_middleware(

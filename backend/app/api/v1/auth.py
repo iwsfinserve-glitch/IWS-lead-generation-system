@@ -158,8 +158,8 @@ async def refresh_access_token(
         raise HTTPException(status_code=401, detail="User not found")
         
     new_access = create_access_token(data={"sub": str(user.id), "role": user.role.value})
-    # We optionally could issue a new refresh token (rotation), but we'll stick to a long-lived one for simplicity here
-    return Token(access_token=new_access, refresh_token=payload.refresh_token)
+    new_refresh = create_refresh_token(data={"sub": str(user.id), "role": user.role.value})
+    return Token(access_token=new_access, refresh_token=new_refresh)
 
 
 @router.get("/me", response_model=UserRead)
