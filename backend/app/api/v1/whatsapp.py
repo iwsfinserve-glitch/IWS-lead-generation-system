@@ -159,7 +159,8 @@ async def list_chats(
     """List all WhatsApp conversations for the current user.
 
     Returns a summary per lead: last message, timestamp, and unread count.
-    Managers/admins see all chats; sales reps see only their assigned leads.
+    WhatsApp chats are strictly personal to each relationship manager / user:
+    all users (Sales Reps, Managers, Admins) only see chats for leads assigned to them.
     """
     instance_name = f"rep_{current_user.id}"
 
@@ -192,10 +193,8 @@ async def list_chats(
             (WhatsAppMessage.lead_id == Lead.id)
             & (WhatsAppMessage.timestamp == latest_msg_sq.c.last_ts),
         )
+        .where(Lead.assigned_rep_id == current_user.id)
     )
-
-    if current_user.is_sales_rep:
-        query = query.where(Lead.assigned_rep_id == current_user.id)
 
     query = query.order_by(desc(latest_msg_sq.c.last_ts))
     result = await db.execute(query)
@@ -242,13 +241,17 @@ async def get_chat_messages(
 
     Returns messages ordered by timestamp ascending (oldest first).
     Marks inbound messages as read.
+    WhatsApp chats are personal: access is restricted strictly to the assigned user.
     """
     lead = await db.get(Lead, lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    if current_user.is_sales_rep and lead.assigned_rep_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    if lead.assigned_rep_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: WhatsApp chats are personal to the assigned relationship manager.",
+        )
 
     result = await db.execute(
         select(WhatsAppMessage)
@@ -262,7 +265,7 @@ async def get_chat_messages(
     # Mark inbound messages as read
     for msg in messages:
         if msg.direction == MessageDirection.inbound and msg.status.value != "read":
-            msg.status = "read"
+            msg.status = MessageStatus.read
     await db.commit()
 
     return messages
@@ -278,6 +281,7 @@ async def send_message(
     """Send a WhatsApp message to a lead from the CRM.
 
     Requires the current user to have a connected WhatsApp instance.
+    Restricted strictly to the lead's assigned user.
     """
     lead = await db.get(Lead, lead_id)
     if not lead:
@@ -285,8 +289,11 @@ async def send_message(
     if not lead.phone_number:
         raise HTTPException(status_code=400, detail="Lead has no phone number")
 
-    if current_user.is_sales_rep and lead.assigned_rep_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    if lead.assigned_rep_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: You can only send WhatsApp messages to leads assigned to you.",
+        )
 
     instance_name = f"rep_{current_user.id}"
     clean_phone = _normalise_phone_for_wa(lead.phone_number)
@@ -338,17 +345,11 @@ async def sync_chat_history(
 
     How it works:
     - Fetches ALL messages for this contact (old + new, inbound + outbound)
-      from Evolution API's local database.
+      from the current user's Evolution API instance.
     - For each message fetched:
         - Already in DB (matched by whatsapp_msg_id) → skipped
         - Not in DB → inserted
     - NO messages are ever deleted. This operation is always safe and additive.
-
-    This means:
-    - A first-time sync populates the entire conversation history.
-    - Subsequent syncs only insert genuinely new messages.
-    - Pressing sync multiple times is idempotent.
-    - Old messages missed during webhook downtime are recovered.
 
     Returns:
         {"imported": N, "already_synced": M, "lead_id": lead_id}
@@ -359,12 +360,15 @@ async def sync_chat_history(
     if not lead.phone_number:
         raise HTTPException(status_code=400, detail="Lead has no phone number — add one first")
 
-    if current_user.is_sales_rep and lead.assigned_rep_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    if lead.assigned_rep_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: You can only sync WhatsApp history for leads assigned to you.",
+        )
 
     instance_name = f"rep_{current_user.id}"
     clean_phone = _normalise_phone_for_wa(lead.phone_number)
-    user_id = lead.assigned_rep_id or current_user.id
+    user_id = current_user.id
 
     # ── Fetch ALL messages for this contact from Evolution API ─────────
     try:
@@ -503,14 +507,18 @@ async def delete_chat(
 
     This hides the chat from the inbox. The actual messages on the WhatsApp
     app are not deleted — only the CRM records are removed.
+    Only the assigned user can delete their chat.
     """
     from sqlalchemy import delete
 
     lead = await db.get(Lead, lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    if current_user.is_sales_rep and lead.assigned_rep_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    if lead.assigned_rep_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: You can only delete chats for leads assigned to you.",
+        )
 
     await db.execute(
         delete(WhatsAppMessage).where(WhatsAppMessage.lead_id == lead_id)
@@ -529,11 +537,11 @@ async def leads_without_chats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return CRM leads that have NO WhatsApp messages yet.
+    """Return CRM leads assigned to the current user that have NO WhatsApp messages yet.
 
     Used by the 'Start Chat' modal to show a lead picker. Only returns leads
     with a phone number so a WhatsApp session can be initiated.
-    Sales reps see only their assigned leads; managers see all.
+    Each user (Sales Rep, Manager, Admin) only sees leads assigned to them.
     """
     existing_sq = (
         select(WhatsAppMessage.lead_id)
@@ -548,12 +556,10 @@ async def leads_without_chats(
             Lead.phone_number.isnot(None),
             Lead.phone_number != "",
             Lead.id.not_in(select(existing_sq)),
+            Lead.assigned_rep_id == current_user.id,
         )
         .order_by(Lead.name.asc())
     )
-
-    if current_user.is_sales_rep:
-        query = query.where(Lead.assigned_rep_id == current_user.id)
 
     result = await db.execute(query)
     leads = result.scalars().all()
@@ -578,13 +584,15 @@ async def create_instance(
     body: InstanceCreateRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """Create a new Evolution API instance for WhatsApp connection.
+    """Create a new Evolution API instance for the current user's WhatsApp connection.
 
-    After creation, the frontend should poll the QR endpoint to display
-    the QR code for the sales rep to scan with their phone.
+    Each user has their own unique instance named `rep_{user_id}`.
+    After creation, the frontend polls the QR endpoint to display
+    the QR code for the user to scan with their phone.
     """
+    instance_name = f"rep_{current_user.id}"
     try:
-        result = await evo_client.create_instance(body.instance_name)
+        result = await evo_client.create_instance(instance_name)
     except Exception as exc:
         logger.exception("Failed to create Evolution instance: %s", exc)
         raise HTTPException(status_code=502, detail="Failed to create WhatsApp instance")
@@ -598,7 +606,7 @@ async def create_instance(
         )
 
     return InstanceStatusResponse(
-        instance_name=body.instance_name,
+        instance_name=instance_name,
         status="connecting",
         qr_code=qr,
     )
@@ -609,7 +617,14 @@ async def get_instance_qr(
     instance_name: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Fetch the QR code for an instance that's waiting for scan."""
+    """Fetch the QR code for the current user's instance."""
+    user_instance = f"rep_{current_user.id}"
+    if instance_name != user_instance:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: You can only access your own WhatsApp instance.",
+        )
+
     try:
         result = await evo_client.get_qr_code(instance_name)
     except Exception as exc:
@@ -632,7 +647,14 @@ async def get_instance_status(
     instance_name: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Check the connection status of a WhatsApp instance."""
+    """Check the connection status of the current user's WhatsApp instance."""
+    user_instance = f"rep_{current_user.id}"
+    if instance_name != user_instance:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: You can only access your own WhatsApp instance.",
+        )
+
     try:
         result = await evo_client.get_instance_status(instance_name)
     except Exception as exc:
@@ -679,29 +701,21 @@ async def logout_instance(
 async def list_instances(
     current_user: User = Depends(get_current_user),
 ):
-    """List all registered Evolution API instances (admin/manager only)."""
-    if current_user.is_sales_rep:
-        instance_name = f"rep_{current_user.id}"
-        try:
-            result = await evo_client.get_instance_status(instance_name)
-            state = "close"
-            if isinstance(result, dict):
-                instance_data = result.get("instance", result)
-                state = instance_data.get("state", "close")
-            return [{"instance_name": instance_name, "status": state}]
-        except Exception:
-            return [{"instance_name": instance_name, "status": "not_created"}]
-
+    """List the current user's Evolution API instance."""
+    instance_name = f"rep_{current_user.id}"
     try:
-        instances = await evo_client.list_instances()
-        return instances
-    except Exception as exc:
-        logger.exception("Failed to list instances: %s", exc)
-        raise HTTPException(status_code=502, detail="Failed to list instances")
+        result = await evo_client.get_instance_status(instance_name)
+        state = "close"
+        if isinstance(result, dict):
+            instance_data = result.get("instance", result)
+            state = instance_data.get("state", "close")
+        return [{"instance_name": instance_name, "status": state}]
+    except Exception:
+        return [{"instance_name": instance_name, "status": "not_created"}]
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Debug Endpoints (Admin / Manager only)
+# Debug Endpoints (Personal only)
 # ═══════════════════════════════════════════════════════════════════════
 
 @router.get("/debug/contacts/{instance_name}")
@@ -709,13 +723,13 @@ async def debug_contacts(
     instance_name: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Debug: Fetch raw contacts from Evolution API."""
-    if (
-        not current_user.is_admin
-        and not current_user.is_manager
-        and f"rep_{current_user.id}" != instance_name
-    ):
-        raise HTTPException(status_code=403, detail="Access denied")
+    """Debug: Fetch raw contacts for current user's instance."""
+    user_instance = f"rep_{current_user.id}"
+    if instance_name != user_instance:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: You can only debug your own WhatsApp instance.",
+        )
     try:
         contacts = await evo_client.find_contacts(instance_name)
         return {"count": len(contacts), "contacts": contacts}
@@ -728,13 +742,13 @@ async def debug_chats(
     instance_name: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Debug: Fetch raw chats from Evolution API."""
-    if (
-        not current_user.is_admin
-        and not current_user.is_manager
-        and f"rep_{current_user.id}" != instance_name
-    ):
-        raise HTTPException(status_code=403, detail="Access denied")
+    """Debug: Fetch raw chats for current user's instance."""
+    user_instance = f"rep_{current_user.id}"
+    if instance_name != user_instance:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: You can only debug your own WhatsApp instance.",
+        )
     try:
         chats = await evo_client.find_chats(instance_name)
         return {"count": len(chats), "chats": chats}

@@ -467,29 +467,10 @@ class EvolutionAPIClient:
             return []
 
         async with httpx.AsyncClient(timeout=30) as client:
-            # Find active open instances to query
-            instances_to_check: list[str] = []
-            try:
-                inst_resp = await client.get(self._url("/instance/fetchInstances"), headers=self.headers)
-                if inst_resp.status_code == 200:
-                    all_inst = inst_resp.json()
-                    open_names = [
-                        inst_obj.get("name")
-                        for inst_obj in all_inst
-                        if isinstance(inst_obj, dict) and inst_obj.get("connectionStatus") == "open" and inst_obj.get("name")
-                    ]
-                    if instance_name and instance_name in open_names:
-                        instances_to_check.append(instance_name)
-                    for iname in open_names:
-                        if iname not in instances_to_check:
-                            instances_to_check.append(iname)
-            except Exception as exc:
-                logger.debug("Could not fetch instance list for message sync: %s", exc)
+            # Only query the specific user's WhatsApp instance
+            instances_to_check: list[str] = [instance_name] if instance_name else []
 
-            if not instances_to_check:
-                instances_to_check = [instance_name] if instance_name else []
-
-            # Resolve all candidate JIDs across available instances
+            # Resolve all candidate JIDs for the contact on this instance
             candidate_jids = await self._resolve_candidate_jids(instances_to_check, phone, client=client)
             logger.info(
                 "fetch_messages_for_contact: resolved candidate JIDs for phone=%s: %s across instances %s",
@@ -772,11 +753,20 @@ async def process_incoming_message(
     4. Log a LeadTimeline entry and create an in-app Notification (if matched to a lead).
     5. Commit.
     """
-    # 1. Resolve lead
+    # 1. Resolve lead and instance owner
     lead_phone = receiver_phone if is_from_me else sender_phone
     lead = await match_lead_by_phone(db, lead_phone)
     lead_id = lead.id if lead else None
-    user_id = lead.assigned_rep_id if lead else None
+
+    # Determine user_id from instance_name (e.g. "rep_3" -> 3) or lead's assigned rep
+    user_id = None
+    if instance_name and instance_name.startswith("rep_"):
+        try:
+            user_id = int(instance_name.split("_")[1])
+        except (ValueError, IndexError):
+            pass
+    if not user_id and lead:
+        user_id = lead.assigned_rep_id
 
     # 2. Upsert message — no lead match guard, save regardless
     direction = MessageDirection.outbound if is_from_me else MessageDirection.inbound
