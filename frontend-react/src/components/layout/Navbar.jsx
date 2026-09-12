@@ -1,8 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, CheckCheck, Menu, Moon, Sun } from 'lucide-react';
+import { Bell, CheckCheck, Menu, Moon, Sun, Trash2, X } from 'lucide-react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
-import { getNotifications, getUnreadCount, markNotificationRead, markAllRead } from '../../api/notificationsApi';
+import {
+  getNotifications,
+  getUnreadCount,
+  markNotificationRead,
+  markAllRead,
+  deleteNotification,
+  clearAllNotifications,
+} from '../../api/notificationsApi';
 import { useTheme } from '../../context/ThemeContext';
 
 export default function Navbar({ title }) {
@@ -81,7 +89,33 @@ export default function Navbar({ title }) {
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
       setUnreadCount(0);
     } catch {
-      // silent
+      toast.error('Failed to mark notifications as read');
+    }
+  };
+
+  const handleClearAll = async (e) => {
+    e?.stopPropagation();
+    try {
+      await clearAllNotifications();
+      setNotifications([]);
+      setUnreadCount(0);
+      toast.success('All notifications cleared');
+    } catch {
+      toast.error('Failed to clear notifications');
+    }
+  };
+
+  const handleDeleteOne = async (e, notifId) => {
+    e.stopPropagation();
+    try {
+      await deleteNotification(notifId);
+      const target = notifications.find((n) => n.id === notifId);
+      setNotifications((prev) => prev.filter((n) => n.id !== notifId));
+      if (target && !target.is_read) {
+        setUnreadCount((prev) => Math.max(0, prev - 1));
+      }
+    } catch {
+      toast.error('Failed to remove notification');
     }
   };
 
@@ -167,20 +201,44 @@ export default function Navbar({ title }) {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                gap: 8,
               }}
             >
-              <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.9rem', whiteSpace: 'nowrap' }}>
                 Notifications {unreadCount > 0 && `(${unreadCount} unread)`}
               </div>
-              {unreadCount > 0 && (
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={handleMarkAllRead}
-                  style={{ fontSize: '0.75rem', padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
-                >
-                  <CheckCheck size={14} /> Mark all read
-                </button>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {unreadCount > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={handleMarkAllRead}
+                    title="Mark all as read"
+                    style={{ fontSize: '0.75rem', padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
+                  >
+                    <CheckCheck size={14} /> Read
+                  </button>
+                )}
+                {notifications.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={handleClearAll}
+                    id="clear-all-notifications-btn"
+                    title="Clear all notifications"
+                    style={{
+                      fontSize: '0.75rem',
+                      padding: '2px 8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      color: 'var(--danger, #ef4444)',
+                    }}
+                  >
+                    <Trash2 size={13} /> Clear all
+                  </button>
+                )}
+              </div>
             </div>
 
             <div style={{ overflowY: 'auto', flex: 1, padding: 8 }}>
@@ -203,8 +261,30 @@ export default function Navbar({ title }) {
                       transition: 'background 0.2s',
                     }}
                   >
-                    <div style={{ fontWeight: notif.is_read ? 600 : 700, fontSize: '0.85rem', marginBottom: 2 }}>
-                      {notif.title}
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
+                      <div style={{ fontWeight: notif.is_read ? 600 : 700, fontSize: '0.85rem' }}>
+                        {notif.title}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteOne(e, notif.id)}
+                        title="Dismiss notification"
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--text-muted, #94a3b8)',
+                          cursor: 'pointer',
+                          padding: 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                          borderRadius: 4,
+                          flexShrink: 0,
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--danger, #ef4444)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted, #94a3b8)'; }}
+                      >
+                        <X size={14} />
+                      </button>
                     </div>
                     <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: 4 }}>
                       {notif.message}
