@@ -3,7 +3,7 @@ Pydantic schemas for User operations — registration, login, responses, and JWT
 """
 
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from app.models.enums import UserRole
 
@@ -11,12 +11,22 @@ from app.models.enums import UserRole
 class UserCreate(BaseModel):
     """Schema for creating a new user (admin-only registration)."""
     name: str = Field(..., min_length=1, max_length=255)
-    username: EmailStr  # We continue validating it as EmailStr to ensure backwards-compat or just a valid email format
+    username: EmailStr | None = None
     email: EmailStr | None = None
     phone_number: str = Field(..., min_length=1, max_length=50)
     password: str = Field(..., min_length=6, max_length=128)
     role: UserRole = UserRole.sales_rep
     manager_id: int | None = None
+
+    @model_validator(mode="after")
+    def sync_username_and_email(self) -> "UserCreate":
+        if not self.username and self.email:
+            self.username = self.email
+        elif not self.email and self.username:
+            self.email = self.username
+        elif not self.username and not self.email:
+            raise ValueError("Either username or email is required")
+        return self
 
 
 class UserRead(BaseModel):

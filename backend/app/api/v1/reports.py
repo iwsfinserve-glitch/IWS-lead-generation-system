@@ -32,6 +32,7 @@ from app.db.session import get_db
 from app.db.base import User, Lead, LeadTimeline, Appointment, Task as TaskModel, LeadSource
 from app.models.enums import UserRole
 from app.api.dependencies import get_current_user, require_roles
+from app.api.helpers import get_lead_or_404
 from app.services.ai_report_generator import (
     generate_lead_journey_report,
     generate_periodic_leads_report,
@@ -58,19 +59,14 @@ def _period_label(start_date: Optional[date], end_date: Optional[date], period: 
     return "All Time"
 
 
+REPORT_LEAD_LOAD_OPTIONS = (
+    selectinload(Lead.source),
+    selectinload(Lead.assigned_rep),
+)
+
+
 async def _get_lead_or_404(lead_id: int, db: AsyncSession) -> Lead:
-    r = await db.execute(
-        select(Lead)
-        .where(Lead.id == lead_id)
-        .options(
-            selectinload(Lead.source),
-            selectinload(Lead.assigned_rep),
-        )
-    )
-    lead = r.scalar_one_or_none()
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
-    return lead
+    return await get_lead_or_404(lead_id, db, options=REPORT_LEAD_LOAD_OPTIONS)
 
 
 async def _get_user_or_404(user_id: int, db: AsyncSession) -> User:

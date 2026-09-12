@@ -16,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
+import sentry_sdk
+
 from app.core.config import settings
 from app.core.scheduler import scheduler, setup_scheduler, _reconcile_appointments_job, _reconcile_tasks_job
 from app.api.v1 import auth, sources, leads, appointments, tasks, reports
@@ -31,6 +33,16 @@ from app.db.session import engine
 from app.db.base import Base
 
 logger = logging.getLogger(__name__)
+
+# Initialize Sentry monitoring if DSN is configured
+if settings.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        environment="production" if settings.PRODUCTION else settings.ENVIRONMENT,
+        traces_sample_rate=0.2 if settings.PRODUCTION else 1.0,
+        send_default_pii=False,
+    )
+    logger.info("Sentry monitoring initialized for environment: %s", "production" if settings.PRODUCTION else settings.ENVIRONMENT)
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -79,6 +91,8 @@ app.add_middleware(
 async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
     """Catch database errors and return a clean 503 response."""
     logger.error("Database error on %s %s: %s", request.method, request.url.path, exc, exc_info=True)
+    if settings.SENTRY_DSN:
+        sentry_sdk.capture_exception(exc)
     return JSONResponse(
         status_code=503,
         content={"error": "A database error occurred. Please try again later.", "code": "DB_ERROR"},
@@ -89,6 +103,8 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
 async def generic_exception_handler(request: Request, exc: Exception):
     """Catch-all for unexpected server errors — prevents stack trace leakage."""
     logger.error("Unhandled error on %s %s: %s", request.method, request.url.path, exc, exc_info=True)
+    if settings.SENTRY_DSN:
+        sentry_sdk.capture_exception(exc)
     return JSONResponse(
         status_code=500,
         content={"error": "Internal server error", "code": "INTERNAL_ERROR"},

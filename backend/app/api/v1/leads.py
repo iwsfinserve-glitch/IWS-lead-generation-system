@@ -31,20 +31,12 @@ from app.schemas.bulk_lead import (
     BulkDeletePayload, BulkDeleteResponse
 )
 from app.api.dependencies import get_current_user, require_roles
+from app.api.helpers import get_lead_or_404, _get_lead_or_404
 from app.services.ai_sync import trigger_ai_analysis_background
 from app.services.notification_service import notify_sales_reps_and_managers
 from app.core.config import settings
 
 router = APIRouter(prefix="/leads", tags=["Leads"])
-
-
-async def _get_lead_or_404(lead_id: int, db: AsyncSession) -> Lead:
-    """Fetch a lead by ID or raise 404."""
-    result = await db.execute(select(Lead).where(Lead.id == lead_id))
-    lead = result.scalar_one_or_none()
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
-    return lead
 
 
 def _check_lead_read_access(lead: Lead, user: User) -> None:

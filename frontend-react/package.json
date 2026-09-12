@@ -7,9 +7,12 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "playwright test",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@sentry/react": "^10.74.0",
     "axios": "^1.18.1",
     "lucide-react": "^1.26.0",
     "react": "^19.2.7",
@@ -19,6 +22,7 @@
     "recharts": "^3.10.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",

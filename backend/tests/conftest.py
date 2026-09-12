@@ -61,7 +61,7 @@ async def db_session(engine):
         await conn.begin()                          # outer transaction
         await conn.begin_nested()                   # SAVEPOINT
 
-        session = AsyncSession(bind=conn, expire_on_commit=False)
+        session = AsyncSession(bind=conn, expire_on_commit=False, join_transaction_mode="create_savepoint")
 
         try:
             yield session
@@ -101,6 +101,7 @@ async def client(db_session):
 async def admin_user(db_session):
     user = User(
         name="Test Admin",
+        username="testadmin@example.com",
         email="testadmin@example.com",
         phone_number="9999900001",
         hashed_password=hash_password("admin123"),
@@ -116,6 +117,7 @@ async def admin_user(db_session):
 async def manager_user(db_session):
     user = User(
         name="Test Manager",
+        username="testmanager@example.com",
         email="testmanager@example.com",
         phone_number="9999900002",
         hashed_password=hash_password("manager123"),
@@ -131,6 +133,7 @@ async def manager_user(db_session):
 async def sales_rep_user(db_session):
     user = User(
         name="Test Rep",
+        username="testrep@example.com",
         email="testrep@example.com",
         phone_number="9999900003",
         hashed_password=hash_password("rep123"),

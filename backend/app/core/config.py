@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     the app will refuse to boot with a clear error message.
     """
 
+    # ── Environment & Production Flags ─────────────────────────────────
+    PRODUCTION: bool = False
+    ENVIRONMENT: str = "development"
+    SENTRY_DSN: str = ""
+
     # ── PostgreSQL (async driver) ──────────────────────────────────────
     DATABASE_URL: str
 

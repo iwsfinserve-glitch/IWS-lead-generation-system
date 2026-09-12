@@ -25,8 +25,9 @@ from app.api.dependencies import get_current_user, require_roles
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-# Allow OAuth locally over HTTP
-os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+# Allow OAuth locally over HTTP in non-production environments
+if not settings.PRODUCTION:
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 limiter = Limiter(key_func=get_remote_address)
 

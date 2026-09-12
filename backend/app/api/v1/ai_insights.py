@@ -31,29 +31,24 @@ from app.ai.features.client_classification import ClientClassificationFeature, C
 from app.ai.exceptions import AIServiceError
 from app.schemas.ai_insight import LeadScoreRead, ContactTimingRead, ClientClassificationRead, AIUnavailableResponse
 from app.api.dependencies import get_current_user
+from app.api.helpers import get_lead_or_404
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/leads", tags=["AI Insights"])
 
+AI_LEAD_LOAD_OPTIONS = (
+    selectinload(Lead.timeline),
+    selectinload(Lead.appointments),
+    selectinload(Lead.source),
+    selectinload(Lead.assigned_rep),
+)
 
-# ── RBAC helpers (mirrors leads.py — inlined to avoid circular import) ───────
+
+# ── RBAC helpers ────────────────────────────────────────────────────────────
 
 async def _get_lead_or_404(lead_id: int, db: AsyncSession) -> Lead:
-    result = await db.execute(
-        select(Lead)
-        .where(Lead.id == lead_id)
-        .options(
-            selectinload(Lead.timeline),
-            selectinload(Lead.appointments),
-            selectinload(Lead.source),
-            selectinload(Lead.assigned_rep),
-        )
-    )
-    lead = result.scalar_one_or_none()
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
-    return lead
+    return await get_lead_or_404(lead_id, db, options=AI_LEAD_LOAD_OPTIONS)
 
 
 def _check_lead_read_access(lead: Lead, user: User) -> None:

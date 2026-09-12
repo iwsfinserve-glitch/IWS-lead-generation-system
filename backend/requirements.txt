@@ -41,3 +41,6 @@ openpyxl
 
 # ── WhatsApp (Evolution API HTTP client) ──
 httpx
+
+# ── Monitoring & Error Tracking ──
+sentry-sdk[fastapi]
